@@ -196,8 +196,31 @@
   }
 
   .animate-ticker {
-    animation: ticker 20s linear infinite;
+    animation: ticker 25s linear infinite;
     white-space: nowrap;
     display: inline-block;
+  }
+
+  @keyframes statusPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  @keyframes cursorBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  @keyframes globalChatPulse {
+    0%, 100% { box-shadow: 0 0 15px rgba(0, 255, 136, 0.4); }
+    50% { box-shadow: 0 0 28px rgba(0, 255, 136, 0.7); }
+  }
+
+  @keyframes monitorFlicker {
+    0%, 95%, 100% { opacity: 1; }
+    96% { opacity: 0.85; }
+    97% { opacity: 1; }
+    98% { opacity: 0.9; }
+    99% { opacity: 1; }
   }
 }
