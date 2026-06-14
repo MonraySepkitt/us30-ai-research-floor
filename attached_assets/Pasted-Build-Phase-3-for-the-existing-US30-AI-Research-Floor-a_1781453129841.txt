@@ -1,0 +1,117 @@
+Build Phase 3 for the existing US30 AI Research Floor app.
+
+Do not redesign the app.
+Do not change the current dashboard, PC view, trading floor, clock, or visual style.
+Only add trader journals, loss protocol, trade history, and research projects.
+
+1. Trader Journal
+
+Each trader must have their own separate journal.
+
+Every closed trade must automatically be logged to that trader’s journal.
+
+Each trade journal entry must show:
+- Entry time in SAST
+- Exit time in SAST
+- Trader name
+- Strategy version
+- Entry reason
+- Exit reason
+- Direction
+- Entry price
+- Exit price
+- Result: Win / Loss / Breakeven
+- R multiple
+- Balance change
+- Market context
+- Timeframes reviewed
+- Mistakes if loss
+- Lesson learned
+- Proposed improvement
+
+2. Loss Protocol
+
+Every losing trade must automatically trigger:
+
+1. Loss recorded
+2. Why it happened
+3. Lesson learned
+4. Proposed improvement
+5. Future test idea
+
+Make the generated loss analysis realistic and specific to each trader’s strategy.
+
+Examples:
+- ICT Trader: entered before liquidity sweep confirmation
+- Trend Trader: traded against higher-timeframe structure
+- Breakout Trader: entered false breakout without retest
+
+3. Open Journal Panel
+
+Improve the Open Journal panel so it shows full trade history for that trader.
+
+Add simple tabs or sections:
+- Summary
+- Trade History
+- Lessons
+- Mistakes
+- Proposed Improvements
+
+Keep it mobile-friendly and retro terminal styled.
+
+4. Research Projects
+
+Each trader can autonomously generate research projects.
+
+Each research project must have:
+- Question
+- Reason
+- Status: Active / Complete / Rejected
+- Progress %
+- Trades reviewed
+- Current findings
+- Proposed strategy change
+
+Generate 1 starter research project per trader on app load.
+
+Examples:
+ICT Trader:
+Question: Do liquidity sweep entries perform better during NY Open?
+
+Trend Trader:
+Question: Do 4H-aligned pullbacks produce better continuation trades?
+
+Breakout Trader:
+Question: Do breakout trades perform better after range compression?
+
+5. PC View Update
+
+Show active research projects inside each trader’s PC View.
+
+Do not clutter the main dashboard.
+
+6. Simulation Integration
+
+Update the simulation engine so:
+- Closed trades create journal entries.
+- Losses create lessons and proposed improvements.
+- Traders occasionally update research project progress.
+- Research projects should feel active but remain simulated/mock for now.
+
+7. Do Not Build Yet
+
+Do not add:
+- Real AI API
+- Real market data
+- Full strategy evolution
+- Scientific validation
+- Real backtesting
+- Shared research database
+
+These are later phases.
+
+After implementation, explain:
+- What files changed
+- How journal entries are created
+- How loss protocol works
+- How research projects update
