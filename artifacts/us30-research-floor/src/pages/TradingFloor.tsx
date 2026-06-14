@@ -1,6 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { candles1H, candles4H, getLatestPrice } from "../data/demoMarketData";
+import { getInitialTraderStates, type TraderState, type TraderId } from "../simulation/traderEngine";
+import { runICTCycle, runTrendCycle, runBreakoutCycle } from "../simulation/traderStrategies";
 
-const TRADER_CONFIG = {
+// ─── Visual config (accent colours, no simulation data) ───────────────────
+
+const TRADER_CONFIG: Record<TraderId, {
+  accent: string;
+  glowColor: string;
+  deskColor: string;
+  shirtColor: string;
+  monitorBg: string;
+  monitorLine: string;
+  statusColor: string;
+}> = {
   ict: {
     accent: "#00ccff",
     glowColor: "rgba(0, 204, 255, 0.4)",
@@ -8,7 +21,6 @@ const TRADER_CONFIG = {
     shirtColor: "#004488",
     monitorBg: "#001a2a",
     monitorLine: "#00ccff",
-    statusCycle: ["THINKING", "ANALYZING", "WAITING", "RESEARCHING", "WAITING"],
     statusColor: "#00ccff",
   },
   trend: {
@@ -18,7 +30,6 @@ const TRADER_CONFIG = {
     shirtColor: "#005522",
     monitorBg: "#001a0f",
     monitorLine: "#00ff88",
-    statusCycle: ["ANALYZING", "RESEARCHING", "THINKING", "WAITING", "IN TRADE"],
     statusColor: "#00ff88",
   },
   breakout: {
@@ -28,70 +39,11 @@ const TRADER_CONFIG = {
     shirtColor: "#882200",
     monitorBg: "#1a0800",
     monitorLine: "#ff6600",
-    statusCycle: ["REHAB", "THINKING", "WAITING", "REHAB", "ANALYZING"],
     statusColor: "#ff6600",
   },
 };
 
-const traders = [
-  {
-    id: "ict" as const,
-    name: "ICT TRADER",
-    shortName: "ICT",
-    status: "Active",
-    balance: "R1,000",
-    action: "Waiting for OTE setup on 15M",
-    bias: "Bullish",
-    confidence: "72%",
-    position: "None",
-    strategyVersion: "v1.0",
-    personality: { discipline: 68, aggression: 45, patience: 82 },
-  },
-  {
-    id: "trend" as const,
-    name: "TREND TRADER",
-    shortName: "TREND",
-    status: "Observation",
-    balance: "R1,000",
-    action: "Monitoring 4H structure break",
-    bias: "Neutral",
-    confidence: "55%",
-    position: "None",
-    strategyVersion: "v1.0",
-    personality: { discipline: 75, aggression: 60, patience: 70 },
-  },
-  {
-    id: "breakout" as const,
-    name: "BREAKOUT TRADER",
-    shortName: "BRKOUT",
-    status: "Rehabilitation",
-    balance: "R1,000",
-    action: "Reviewing last 3 losses",
-    bias: "Bearish",
-    confidence: "40%",
-    position: "None",
-    strategyVersion: "v1.0",
-    personality: { discipline: 50, aggression: 80, patience: 35 },
-  },
-];
-
-const ACTIVITY_POOL = [
-  { traderId: "ict", msg: "rejected long setup — OTE not clean" },
-  { traderId: "trend", msg: "analyzing 1H structure break" },
-  { traderId: "breakout", msg: "watching range compression on M15" },
-  { traderId: "ict", msg: "waiting for liquidity sweep below 43,100" },
-  { traderId: "trend", msg: "updated bias to neutral — waiting for 4H close" },
-  { traderId: "breakout", msg: "reviewing last 3 losses — rehab protocol active" },
-  { traderId: "ict", msg: "identified order block at 43,180" },
-  { traderId: "trend", msg: "structure break confirmed on 1H" },
-  { traderId: "breakout", msg: "noted stop hunt on previous session" },
-  { traderId: "ict", msg: "FVG filled — monitoring for reaction" },
-  { traderId: "trend", msg: "EMA stack aligning — bias shifting bullish" },
-  { traderId: "breakout", msg: "compression tightening — breakout imminent" },
-  { traderId: "ict", msg: "session bias: BULLISH above 43,100" },
-  { traderId: "trend", msg: "risk adjusted to 0.5% pending confirmation" },
-  { traderId: "breakout", msg: "passed patience check — no trade taken" },
-];
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
 function getSASTTime() {
   return new Intl.DateTimeFormat("en-ZA", {
@@ -104,19 +56,32 @@ function getSASTTime() {
 
 function getMarketStatus() {
   const now = new Date();
-  const day = now.toLocaleDateString("en-ZA", {
-    weekday: "long",
-    timeZone: "Africa/Johannesburg",
-  });
-  const time = now.toLocaleTimeString("en-ZA", {
-    timeZone: "Africa/Johannesburg",
-    hour12: false,
-  });
+  const day = now.toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" });
+  const time = now.toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour12: false });
   const [h, m] = time.split(":").map(Number);
   const mins = h * 60 + m;
-  const isWeekday = !["Saturday", "Sunday"].includes(day);
-  return isWeekday && mins >= 15 * 60 + 30 && mins < 22 * 60;
+  return !["Saturday", "Sunday"].includes(day) && mins >= 15 * 60 + 30 && mins < 22 * 60;
 }
+
+function statusBadgeColor(status: string) {
+  switch (status) {
+    case "Active": case "IN TRADE": return "#00ff88";
+    case "Observation": return "#ffcc00";
+    case "Rehabilitation": case "REHAB": return "#ff6600";
+    case "Suspended": return "#ff2222";
+    default: return "#00ccff";
+  }
+}
+
+function fmtBal(n: number) {
+  return `R${n.toFixed(2)}`;
+}
+
+function fmtPL(n: number) {
+  return (n >= 0 ? "+" : "") + `R${n.toFixed(2)}`;
+}
+
+// ─── Activity log entry ───────────────────────────────────────────────────
 
 interface ActivityEntry {
   id: number;
@@ -125,18 +90,12 @@ interface ActivityEntry {
   msg: string;
 }
 
-function TraderDesk({ trader }: { trader: typeof traders[0] }) {
+// ─── Animated trader desk ─────────────────────────────────────────────────
+
+function TraderDesk({ trader }: { trader: TraderState }) {
   const cfg = TRADER_CONFIG[trader.id];
-  const [statusIdx, setStatusIdx] = useState(0);
   const [cursorOn, setCursorOn] = useState(true);
   const [chartFrame, setChartFrame] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setStatusIdx((i) => (i + 1) % cfg.statusCycle.length);
-    }, 2800 + trader.id.length * 400);
-    return () => clearInterval(id);
-  }, [cfg.statusCycle.length, trader.id]);
 
   useEffect(() => {
     const id = setInterval(() => setCursorOn((v) => !v), 530);
@@ -144,7 +103,7 @@ function TraderDesk({ trader }: { trader: typeof traders[0] }) {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setChartFrame((f) => (f + 1) % 8), 700);
+    const id = setInterval(() => setChartFrame((f) => (f + 1) % 8), 650);
     return () => clearInterval(id);
   }, []);
 
@@ -159,8 +118,7 @@ function TraderDesk({ trader }: { trader: typeof traders[0] }) {
     [8, 4, 7, 5, 6, 4, 7, 8],
   ];
 
-  const currentBars = chartBars[chartFrame];
-  const currentStatus = cfg.statusCycle[statusIdx];
+  const isInTrade = trader.status === "IN TRADE";
 
   return (
     <div className="flex flex-col items-center gap-1" style={{ minWidth: 72 }}>
@@ -175,141 +133,67 @@ function TraderDesk({ trader }: { trader: typeof traders[0] }) {
         }}
         data-testid={`status-bubble-${trader.id}`}
       >
-        {currentStatus}
+        {trader.status}
       </div>
 
       {/* Figure + Desk */}
       <div className="relative flex flex-col items-center" style={{ width: 64, height: 68 }}>
-        {/* Head */}
-        <div
-          className="absolute"
-          style={{
-            bottom: 28,
-            width: 12,
-            height: 12,
-            backgroundColor: "#ffcc88",
-            border: "2px solid #333",
-            left: "50%",
-            transform: "translateX(-50%)",
-          }}
-        />
-        {/* Body / shirt */}
-        <div
-          className="absolute"
-          style={{
-            bottom: 16,
-            width: 16,
-            height: 12,
-            backgroundColor: cfg.shirtColor,
-            border: `2px solid ${cfg.accent}`,
-            left: "50%",
-            transform: "translateX(-50%)",
-          }}
-        />
-        {/* Desk */}
-        <div
-          className="absolute bottom-0"
-          style={{
-            width: 64,
-            height: 14,
-            backgroundColor: cfg.deskColor,
-            border: `2px solid ${cfg.accent}`,
-            boxShadow: `0 0 8px ${cfg.glowColor}`,
-          }}
-        />
+        <div className="absolute" style={{ bottom: 28, width: 12, height: 12, backgroundColor: "#ffcc88", border: "2px solid #333", left: "50%", transform: "translateX(-50%)" }} />
+        <div className="absolute" style={{ bottom: 16, width: 16, height: 12, backgroundColor: cfg.shirtColor, border: `2px solid ${cfg.accent}`, left: "50%", transform: "translateX(-50%)" }} />
+        <div className="absolute bottom-0" style={{ width: 64, height: 14, backgroundColor: cfg.deskColor, border: `2px solid ${cfg.accent}`, boxShadow: `0 0 8px ${cfg.glowColor}` }} />
+
         {/* Monitor */}
         <div
           className="absolute"
           style={{
-            bottom: 14,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 30,
-            height: 22,
+            bottom: 14, left: "50%", transform: "translateX(-50%)",
+            width: 30, height: 22,
             backgroundColor: "#111",
-            border: `2px solid ${cfg.accent}`,
-            boxShadow: `0 0 8px ${cfg.glowColor}`,
+            border: `2px solid ${isInTrade ? "#00ff44" : cfg.accent}`,
+            boxShadow: `0 0 ${isInTrade ? 14 : 8}px ${isInTrade ? "rgba(0,255,68,0.6)" : cfg.glowColor}`,
             zIndex: 10,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
+            display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+            animation: "monitorFlicker 8s step-start infinite",
           }}
         >
-          {/* Screen */}
-          <div
-            style={{
-              width: 24,
-              height: 16,
-              backgroundColor: cfg.monitorBg,
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "flex-end",
-              alignItems: "flex-start",
-              padding: "1px",
-              gap: 1,
-              overflow: "hidden",
-            }}
-          >
-            {/* Mini chart bars */}
+          <div style={{ width: 24, height: 16, backgroundColor: cfg.monitorBg, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "1px", gap: 1, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "flex-end", gap: "1px", height: 10, width: "100%" }}>
-              {currentBars.map((h, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 2,
-                    height: h,
-                    backgroundColor: i % 3 === 0 ? cfg.monitorLine : i % 3 === 1 ? "#ff4444" : cfg.monitorLine,
-                    opacity: 0.9,
-                    transition: "height 0.3s ease",
-                  }}
-                />
+              {chartBars[chartFrame].map((h, i) => (
+                <div key={i} style={{ width: 2, height: h, backgroundColor: i % 3 === 1 ? "#ff4444" : cfg.monitorLine, opacity: 0.9, transition: "height 0.25s ease" }} />
               ))}
             </div>
-            {/* Cursor row */}
             <div style={{ display: "flex", alignItems: "center", height: 3 }}>
-              <div
-                style={{
-                  width: 2,
-                  height: 3,
-                  backgroundColor: cursorOn ? cfg.monitorLine : "transparent",
-                }}
-              />
+              <div style={{ width: 2, height: 3, backgroundColor: cursorOn ? cfg.monitorLine : "transparent" }} />
             </div>
           </div>
         </div>
       </div>
 
       {/* Name tag */}
-      <div
-        className="text-center text-[7px] leading-tight"
-        style={{ color: cfg.accent, maxWidth: 72 }}
-      >
-        <div>{trader.shortName}</div>
+      <div className="text-center text-[7px] leading-tight" style={{ color: cfg.accent, maxWidth: 72 }}>
+        <div>{trader.id === "ict" ? "ICT" : trader.id === "trend" ? "TREND" : "BRKOUT"}</div>
         <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 6 }}>TRADER</div>
       </div>
     </div>
   );
 }
 
+// ─── Main component ───────────────────────────────────────────────────────
+
 export default function TradingFloor() {
   const [time, setTime] = useState("");
   const [marketOpen, setMarketOpen] = useState(false);
-  const [activeModal, setActiveModal] = useState<{ type: string; traderId?: string } | null>(null);
+  const [traderStates, setTraderStates] = useState<TraderState[]>(getInitialTraderStates);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
-  const activityCounter = useRef(0);
-  const activityPoolRef = useRef(0);
+  const [activeModal, setActiveModal] = useState<{ type: string; traderId?: TraderId } | null>(null);
+  const [nextCycleIn, setNextCycleIn] = useState(35);
+  const cycleCounterRef = useRef(0);
+  const activityIdRef = useRef(0);
 
+  // ── Clock & market status ───────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
-      const now = new Date();
-      const sast = new Intl.DateTimeFormat("en-ZA", {
-        timeZone: "Africa/Johannesburg",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      }).format(now);
+      const sast = new Intl.DateTimeFormat("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date());
       setTime(sast + " SAST");
       setMarketOpen(getMarketStatus());
     };
@@ -318,110 +202,142 @@ export default function TradingFloor() {
     return () => clearInterval(id);
   }, []);
 
+  // ── Simulation engine ───────────────────────────────────────────────────
+  const runSimCycle = useCallback(() => {
+    cycleCounterRef.current++;
+    const newEvents: ActivityEntry[] = [];
+
+    setTraderStates((prev) =>
+      prev.map((t) => {
+        let result: { state: TraderState; event: { traderId: string; msg: string } | null };
+        if (t.id === "ict") result = runICTCycle(t, candles1H, candles4H);
+        else if (t.id === "trend") result = runTrendCycle(t, candles1H, candles4H);
+        else result = runBreakoutCycle(t, candles1H);
+
+        if (result.event) {
+          newEvents.push({
+            id: ++activityIdRef.current,
+            time: getSASTTime(),
+            traderId: result.event.traderId,
+            msg: result.event.msg,
+          });
+        }
+        return result.state;
+      })
+    );
+
+    if (newEvents.length > 0) {
+      setActivityLog((prev) => [...newEvents, ...prev].slice(0, 8));
+    }
+  }, []);
+
+  // Run first cycle after short delay, then every 35–50s
   useEffect(() => {
-    const addEntry = () => {
-      const pool = ACTIVITY_POOL[activityPoolRef.current % ACTIVITY_POOL.length];
-      activityPoolRef.current++;
-      activityCounter.current++;
-      const entry: ActivityEntry = {
-        id: activityCounter.current,
-        time: getSASTTime(),
-        traderId: pool.traderId,
-        msg: pool.msg,
-      };
-      setActivityLog((prev) => [entry, ...prev].slice(0, 6));
-    };
-    addEntry();
-    const id = setInterval(addEntry, 4200);
+    const firstRun = setTimeout(() => {
+      runSimCycle();
+    }, 2000);
+
+    const intervalMs = 35000 + Math.random() * 15000;
+    const interval = setInterval(() => {
+      runSimCycle();
+      setNextCycleIn(Math.round(intervalMs / 1000));
+    }, intervalMs);
+
+    return () => { clearTimeout(firstRun); clearInterval(interval); };
+  }, [runSimCycle]);
+
+  // Countdown display
+  useEffect(() => {
+    const id = setInterval(() => setNextCycleIn((n) => Math.max(0, n - 1)), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const openModal = (type: string, traderId?: string) => setActiveModal({ type, traderId });
+  const openModal = (type: string, traderId?: TraderId) => setActiveModal({ type, traderId });
   const closeModal = () => setActiveModal(null);
-  const activeTrader = activeModal?.traderId ? traders.find((t) => t.id === activeModal.traderId) : null;
 
-  function getTraderLabel(traderId: string) {
-    const t = traders.find((t) => t.id === traderId);
-    return t ? t.name : traderId.toUpperCase();
+  const activeTrader = activeModal?.traderId
+    ? traderStates.find((t) => t.id === activeModal.traderId)
+    : null;
+
+  function getTraderAccent(id: string) {
+    return TRADER_CONFIG[id as TraderId]?.accent ?? "#00ff88";
   }
 
-  function getTraderAccent(traderId: string) {
-    return TRADER_CONFIG[traderId as keyof typeof TRADER_CONFIG]?.accent ?? "#00ff88";
-  }
+  const currentPrice = getLatestPrice();
 
+  // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col min-h-screen font-sans pb-10">
-      {/* Header */}
+
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <header className="border-b border-border bg-card p-3 flex flex-col md:flex-row justify-between items-center gap-3">
-        <h1
-          className="text-primary text-[10px] md:text-sm"
-          style={{ textShadow: "0 0 10px #00ff88" }}
-        >
+        <h1 className="text-primary text-[10px] md:text-sm" style={{ textShadow: "0 0 10px #00ff88" }}>
           US30 AI RESEARCH FLOOR
         </h1>
         <div className="flex items-center gap-3 text-[8px] flex-wrap justify-center">
           <div className="text-secondary" data-testid="sast-clock">{time}</div>
           <div
-            className={`border px-2 py-1 ${
-              marketOpen ? "border-primary text-primary" : "border-destructive text-destructive"
-            }`}
+            className={`border px-2 py-1 ${marketOpen ? "border-primary text-primary" : "border-destructive text-destructive"}`}
             style={{ boxShadow: marketOpen ? "0 0 6px rgba(0,255,136,0.3)" : "0 0 6px rgba(255,0,0,0.3)" }}
             data-testid="market-status"
           >
             {marketOpen ? "[OPEN]" : "[CLOSED]"}
           </div>
-          <div className="border border-[#ffaa00] text-[#ffaa00] px-2 py-1" data-testid="demo-badge">
-            [DEMO DATA]
-          </div>
+          <div className="border border-[#ffaa00] text-[#ffaa00] px-2 py-1" data-testid="demo-badge">[DEMO DATA]</div>
+          <div className="text-muted-foreground text-[7px]">US30 {currentPrice.toFixed(0)}</div>
         </div>
       </header>
 
-      {/* Trading Floor Scene */}
+      {/* ── Trading Floor Scene ─────────────────────────────────────────── */}
       <section
         className="w-full border-b border-border flex flex-col overflow-hidden relative"
         style={{
           height: 200,
-          backgroundImage:
-            "linear-gradient(rgba(0, 255, 136, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 136, 0.06) 1px, transparent 1px)",
+          backgroundImage: "linear-gradient(rgba(0, 255, 136, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 136, 0.06) 1px, transparent 1px)",
           backgroundSize: "20px 20px",
           backgroundColor: "#040408",
         }}
       >
-        {/* Scene label */}
-        <div className="absolute top-2 left-3 text-[6px] text-muted-foreground opacity-60">
-          FLOOR.VIEW // ACTIVE
+        <div className="absolute top-2 left-3 text-[6px] text-muted-foreground opacity-50">
+          FLOOR.VIEW // SIM ACTIVE // CYCLE #{cycleCounterRef.current}
+        </div>
+        <div className="absolute top-2 right-3 text-[6px] text-muted-foreground opacity-50">
+          NEXT: {nextCycleIn}s
         </div>
 
         <div className="flex-1 flex justify-center items-end pb-6 gap-6 md:gap-14">
-          {traders.map((trader) => (
-            <TraderDesk key={trader.id} trader={trader} />
+          {traderStates.map((t) => (
+            <TraderDesk key={t.id} trader={t} />
           ))}
         </div>
 
-        {/* Market price ticker */}
+        {/* Price ticker */}
         <div className="absolute bottom-0 w-full h-[18px] bg-black border-t border-border overflow-hidden flex items-center">
           <div className="animate-ticker text-[7px] text-primary whitespace-nowrap inline-block">
-            &nbsp;&nbsp;US30 43,250.00&nbsp;&nbsp;|&nbsp;&nbsp;BIAS: BULLISH&nbsp;&nbsp;|&nbsp;&nbsp;SESSION: NY PRE-MARKET&nbsp;&nbsp;|&nbsp;&nbsp;SPREAD: 1.2pts&nbsp;&nbsp;|&nbsp;&nbsp;VOL: MEDIUM&nbsp;&nbsp;|&nbsp;&nbsp;ATR: 85pts&nbsp;&nbsp;|&nbsp;&nbsp;US30 43,250.00&nbsp;&nbsp;|&nbsp;&nbsp;BIAS: BULLISH&nbsp;&nbsp;|&nbsp;&nbsp;SESSION: NY PRE-MARKET&nbsp;&nbsp;|&nbsp;&nbsp;SPREAD: 1.2pts&nbsp;&nbsp;|&nbsp;&nbsp;VOL: MEDIUM&nbsp;&nbsp;|&nbsp;&nbsp;ATR: 85pts&nbsp;&nbsp;
+            &nbsp;&nbsp;US30 {currentPrice.toFixed(2)}&nbsp;&nbsp;|&nbsp;&nbsp;BIAS: DEMO&nbsp;&nbsp;|&nbsp;&nbsp;SESSION: SIMULATION&nbsp;&nbsp;|&nbsp;&nbsp;SPREAD: 1.2pts&nbsp;&nbsp;|&nbsp;&nbsp;ICT: {traderStates[0].bias.toUpperCase()}&nbsp;&nbsp;|&nbsp;&nbsp;TREND: {traderStates[1].bias.toUpperCase()}&nbsp;&nbsp;|&nbsp;&nbsp;BRKOUT: {traderStates[2].bias.toUpperCase()}&nbsp;&nbsp;|&nbsp;&nbsp;US30 {currentPrice.toFixed(2)}&nbsp;&nbsp;|&nbsp;&nbsp;BIAS: DEMO&nbsp;&nbsp;|&nbsp;&nbsp;SESSION: SIMULATION&nbsp;&nbsp;|&nbsp;&nbsp;SPREAD: 1.2pts&nbsp;&nbsp;|&nbsp;&nbsp;ICT: {traderStates[0].bias.toUpperCase()}&nbsp;&nbsp;|&nbsp;&nbsp;TREND: {traderStates[1].bias.toUpperCase()}&nbsp;&nbsp;|&nbsp;&nbsp;BRKOUT: {traderStates[2].bias.toUpperCase()}&nbsp;&nbsp;
           </div>
         </div>
       </section>
 
-      {/* Activity Feed */}
+      {/* ── Activity Feed ───────────────────────────────────────────────── */}
       <section className="border-b border-border bg-[#04040a] px-4 py-2" data-testid="activity-feed">
-        <div className="text-[7px] text-muted-foreground mb-1">// ACTIVITY LOG</div>
-        <div className="flex flex-col gap-[3px] min-h-[60px]">
+        <div className="flex justify-between items-center mb-1">
+          <div className="text-[7px] text-muted-foreground">// ACTIVITY LOG</div>
+          <div className="text-[6px] text-muted-foreground opacity-60">LIVE SIM</div>
+        </div>
+        <div className="flex flex-col gap-[3px] min-h-[56px]">
+          {activityLog.length === 0 && (
+            <div className="text-[7px] text-muted-foreground opacity-50">Awaiting first simulation cycle...</div>
+          )}
           {activityLog.map((entry, idx) => (
             <div
               key={entry.id}
               className="flex items-baseline gap-2 text-[7px] overflow-hidden"
-              style={{ opacity: 1 - idx * 0.14, transition: "opacity 0.5s" }}
+              style={{ opacity: 1 - idx * 0.13 }}
             >
               <span className="text-muted-foreground shrink-0">[{entry.time}]</span>
-              <span
-                className="shrink-0 font-bold"
-                style={{ color: getTraderAccent(entry.traderId) }}
-              >
-                {getTraderLabel(entry.traderId)}:
+              <span className="font-bold shrink-0" style={{ color: getTraderAccent(entry.traderId) }}>
+                {traderStates.find(t => t.id === entry.traderId)?.name ?? entry.traderId.toUpperCase()}:
               </span>
               <span className="text-foreground truncate">{entry.msg}</span>
             </div>
@@ -429,60 +345,39 @@ export default function TradingFloor() {
         </div>
       </section>
 
-      {/* Trader Cards */}
+      {/* ── Trader Cards ────────────────────────────────────────────────── */}
       <main className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 max-w-6xl mx-auto w-full flex-1">
-        {traders.map((trader) => {
+        {traderStates.map((trader) => {
           const cfg = TRADER_CONFIG[trader.id];
+          const statusColor = statusBadgeColor(trader.status);
+          const plColor = trader.openPosition
+            ? trader.openPosition.unrealizedPL >= 0 ? "#00ff88" : "#ff4444"
+            : undefined;
+
           return (
             <div
               key={trader.id}
-              className="border bg-card p-4 flex flex-col gap-4"
-              style={{
-                borderColor: cfg.accent,
-                boxShadow: `0 0 12px ${cfg.glowColor.replace("0.4", "0.08")}`,
-              }}
+              className="border bg-card p-4 flex flex-col gap-3"
+              style={{ borderColor: cfg.accent, boxShadow: `0 0 12px ${cfg.glowColor.replace("0.4", "0.07")}` }}
               data-testid={`card-${trader.id}`}
             >
-              <div
-                className="flex justify-between items-start border-b pb-2"
-                style={{ borderColor: cfg.accent + "44" }}
-              >
-                <h2 className="text-[10px]" style={{ color: cfg.accent }}>
-                  {trader.name}
-                </h2>
-                <span
-                  className="text-[7px] px-1 py-[2px] border"
-                  style={{
-                    borderColor:
-                      trader.status === "Active"
-                        ? cfg.accent
-                        : trader.status === "Observation"
-                        ? "#ffcc00"
-                        : trader.status === "Rehabilitation"
-                        ? "#ff6600"
-                        : "#ff2222",
-                    color:
-                      trader.status === "Active"
-                        ? cfg.accent
-                        : trader.status === "Observation"
-                        ? "#ffcc00"
-                        : trader.status === "Rehabilitation"
-                        ? "#ff6600"
-                        : "#ff2222",
-                  }}
-                >
+              {/* Card header */}
+              <div className="flex justify-between items-start border-b pb-2" style={{ borderColor: cfg.accent + "44" }}>
+                <h2 className="text-[10px]" style={{ color: cfg.accent }}>{trader.name}</h2>
+                <span className="text-[7px] px-1 py-[2px] border" style={{ borderColor: statusColor, color: statusColor }}>
                   [{trader.status.toUpperCase()}]
                 </span>
               </div>
 
-              <div className="text-[8px] flex flex-col gap-[6px]">
+              {/* Stats */}
+              <div className="text-[8px] flex flex-col gap-[5px]">
                 <div className="flex justify-between" style={{ color: cfg.accent }}>
                   <span>BALANCE:</span>
-                  <span>{trader.balance}</span>
+                  <span>{fmtBal(trader.balance)}</span>
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="shrink-0">ACTION:</span>
-                  <span className="text-right">{trader.action}</span>
+                  <span className="text-right leading-snug">{trader.currentAction}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>BIAS:</span>
@@ -490,23 +385,56 @@ export default function TradingFloor() {
                 </div>
                 <div className="flex justify-between">
                   <span>CONFIDENCE:</span>
-                  <span>{trader.confidence}</span>
+                  <span>{trader.confidence}%</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>POSITION:</span>
-                  <span>{trader.position.toUpperCase()}</span>
-                </div>
+
+                {/* Open position */}
+                {trader.openPosition ? (
+                  <div className="border border-dashed p-2 text-[7px] flex flex-col gap-[3px]" style={{ borderColor: cfg.accent + "66" }}>
+                    <div className="flex justify-between">
+                      <span>POSITION:</span>
+                      <span style={{ color: trader.openPosition.direction === "BUY" ? "#00ff88" : "#ff4444" }}>
+                        [{trader.openPosition.direction}] @ {trader.openPosition.entryPrice.toFixed(0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>SL / TP:</span>
+                      <span className="text-muted-foreground">
+                        {trader.openPosition.stopLoss.toFixed(0)} / {trader.openPosition.takeProfit.toFixed(0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>UNREAL P/L:</span>
+                      <span style={{ color: plColor }}>{fmtPL(trader.openPosition.unrealizedPL)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span>POSITION:</span>
+                    <span className="text-muted-foreground">NONE</span>
+                  </div>
+                )}
+
+                {/* Last closed trade */}
+                {trader.closedTrades.length > 0 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>LAST TRADE:</span>
+                    <span style={{ color: trader.closedTrades[0].result >= 0 ? "#00ff88" : "#ff4444" }}>
+                      {trader.closedTrades[0].direction} {trader.closedTrades[0].rMultiple >= 0 ? "+" : ""}{trader.closedTrades[0].rMultiple.toFixed(1)}R
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex justify-between text-muted-foreground">
                   <span>STRATEGY:</span>
                   <span>{trader.strategyVersion}</span>
                 </div>
               </div>
 
-              <div className="mt-1">
-                <h3 className="text-[7px] mb-2" style={{ color: cfg.accent }}>
-                  PERSONALITY:
-                </h3>
-                <div className="flex flex-col gap-[6px]">
+              {/* Personality bars */}
+              <div>
+                <h3 className="text-[7px] mb-2" style={{ color: cfg.accent }}>PERSONALITY:</h3>
+                <div className="flex flex-col gap-[5px]">
                   {[
                     { label: "DISCIPLINE", val: trader.personality.discipline },
                     { label: "AGGRESSION", val: trader.personality.aggression },
@@ -514,32 +442,21 @@ export default function TradingFloor() {
                   ].map((stat) => (
                     <div key={stat.label} className="flex items-center gap-2">
                       <span className="text-[7px] w-[72px] shrink-0">{stat.label}</span>
-                      <div className="flex-1 h-[6px] flex bg-[#111] border border-[#333]">
-                        <div
-                          className="h-full"
-                          style={{ width: `${stat.val}%`, backgroundColor: cfg.accent }}
-                        />
+                      <div className="flex-1 h-[6px] bg-[#111] border border-[#333]">
+                        <div className="h-full" style={{ width: `${stat.val}%`, backgroundColor: cfg.accent }} />
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 mt-auto pt-3">
+              {/* Buttons */}
+              <div className="flex flex-col gap-2 mt-auto pt-2">
                 <button
                   className="w-full p-2 text-[8px] transition-all border"
-                  style={{
-                    borderColor: cfg.accent,
-                    color: cfg.accent,
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 0 10px ${cfg.glowColor}`;
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = cfg.accent + "22";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = "none";
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
-                  }}
+                  style={{ borderColor: cfg.accent, color: cfg.accent }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = `0 0 10px ${cfg.glowColor}`; (e.currentTarget as HTMLElement).style.backgroundColor = cfg.accent + "22"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "none"; (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                   onClick={() => openModal("pc", trader.id)}
                   data-testid={`btn-pc-${trader.id}`}
                 >
@@ -547,14 +464,8 @@ export default function TradingFloor() {
                 </button>
                 <button
                   className="w-full border border-secondary text-secondary p-2 text-[8px] transition-all"
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 0 10px rgba(0,204,255,0.4)";
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(0,204,255,0.1)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = "none";
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
-                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "0 0 10px rgba(0,204,255,0.4)"; (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(0,204,255,0.1)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "none"; (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                   onClick={() => openModal("journal", trader.id)}
                   data-testid={`btn-journal-${trader.id}`}
                 >
@@ -562,14 +473,8 @@ export default function TradingFloor() {
                 </button>
                 <button
                   className="w-full border border-destructive text-destructive p-2 text-[8px] transition-all"
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 0 10px rgba(255,0,0,0.4)";
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(255,0,0,0.1)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = "none";
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
-                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "0 0 10px rgba(255,0,0,0.4)"; (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,0,0,0.1)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "none"; (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                   onClick={() => openModal("demote", trader.id)}
                   data-testid={`btn-demote-${trader.id}`}
                 >
@@ -581,19 +486,13 @@ export default function TradingFloor() {
         })}
       </main>
 
+      {/* ── Global chat button ──────────────────────────────────────────── */}
       <div className="p-4 flex justify-center pb-8 mt-4">
         <button
           className="w-full md:w-auto px-8 py-4 border-2 border-primary text-primary text-[9px] transition-all"
-          style={{
-            boxShadow: "0 0 15px rgba(0,255,136,0.4)",
-            animation: "globalChatPulse 2.5s ease-in-out infinite",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(0,255,136,0.1)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
-          }}
+          style={{ boxShadow: "0 0 15px rgba(0,255,136,0.4)", animation: "globalChatPulse 2.5s ease-in-out infinite" }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(0,255,136,0.1)"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
           onClick={() => openModal("chat")}
           data-testid="btn-chat"
         >
@@ -601,181 +500,173 @@ export default function TradingFloor() {
         </button>
       </div>
 
-      {/* MODALS */}
+      {/* ── Modals ──────────────────────────────────────────────────────── */}
       {activeModal && (
-        <div className="fixed inset-0 bg-black/85 z-[10000] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/85 z-[10000] flex items-center justify-center p-4" onClick={closeModal}>
           <div
-            className="w-full max-w-2xl bg-card border-2 flex flex-col max-h-[80vh]"
+            className="w-full max-w-2xl bg-card border-2 flex flex-col max-h-[85vh]"
+            onClick={(e) => e.stopPropagation()}
             style={{
-              borderColor:
-                activeModal.traderId
-                  ? TRADER_CONFIG[activeModal.traderId as keyof typeof TRADER_CONFIG]?.accent ?? "#00ff88"
-                  : "#00ff88",
-              boxShadow: `0 0 30px ${
-                activeModal.traderId
-                  ? TRADER_CONFIG[activeModal.traderId as keyof typeof TRADER_CONFIG]?.glowColor ?? "rgba(0,255,136,0.3)"
-                  : "rgba(0,255,136,0.3)"
-              }`,
+              borderColor: activeModal.traderId ? TRADER_CONFIG[activeModal.traderId].accent : "#00ff88",
+              boxShadow: `0 0 30px ${activeModal.traderId ? TRADER_CONFIG[activeModal.traderId].glowColor : "rgba(0,255,136,0.3)"}`,
             }}
           >
-            <div
-              className="border-b p-3 flex justify-between items-center bg-[#080810]"
-              style={{
-                borderColor:
-                  activeModal.traderId
-                    ? TRADER_CONFIG[activeModal.traderId as keyof typeof TRADER_CONFIG]?.accent + "55" ?? "#00ff8855"
-                    : "#00ff8855",
-              }}
-            >
+            {/* Modal header */}
+            <div className="border-b p-3 flex justify-between items-center bg-[#080810]" style={{ borderColor: (activeModal.traderId ? TRADER_CONFIG[activeModal.traderId].accent : "#00ff88") + "55" }}>
               <h2 className="text-[9px] text-primary">
-                {activeModal.type === "chat"
-                  ? "// TRADING FLOOR CHAT"
-                  : activeModal.type === "demote"
-                  ? "// SYSTEM ALERT"
+                {activeModal.type === "chat" ? "// TRADING FLOOR CHAT"
+                  : activeModal.type === "demote" ? "// SYSTEM ALERT"
                   : `// ${activeTrader?.name} — ${activeModal.type === "pc" ? "PC VIEW" : "JOURNAL"}`}
               </h2>
-              <button
-                onClick={closeModal}
-                className="text-primary hover:text-white text-[9px] px-2"
-                data-testid="btn-close-modal"
-              >
-                [X]
-              </button>
+              <button onClick={closeModal} className="text-primary hover:text-white text-[9px] px-2" data-testid="btn-close-modal">[X]</button>
             </div>
 
             <div className="p-4 overflow-y-auto text-[8px] text-foreground flex-1 leading-relaxed">
-              {activeModal.type === "pc" && activeTrader && (
-                <div className="flex flex-col gap-[6px] text-primary font-mono">
-                  <div className="text-muted-foreground text-[7px] mb-2">
-                    ┌─────────────────────────────────────────┐
-                  </div>
-                  <div>&gt; SYSTEM ONLINE</div>
-                  <div>&gt; CONNECTING TO MARKET FEED...</div>
-                  <div style={{ color: TRADER_CONFIG[activeTrader.id].accent }}>
-                    &gt; US30 FEED: ACTIVE
-                  </div>
-                  <div>&gt; LAST PRICE: 43,250.00</div>
-                  <div>&gt; STRATEGY: {activeTrader.strategyVersion}</div>
-                  <div>&gt; TRADER STATUS: {activeTrader.status.toUpperCase()}</div>
-                  <div>&gt; SESSION BIAS: {activeTrader.bias.toUpperCase()}</div>
-                  <div>&gt; CONFIDENCE: {activeTrader.confidence}</div>
-                  <div>&gt; AWAITING SIGNAL...</div>
-                  <div className="mt-2 text-[7px]">
-                    <span style={{ color: TRADER_CONFIG[activeTrader.id].accent }}>
-                      {"█".repeat(8)}
-                    </span>
-                    <span className="text-[#333]">{"░".repeat(8)}</span>
-                    <span className="ml-2">52% LOADED</span>
-                  </div>
-                  <div className="mt-3 flex items-center gap-1">
-                    <span>&gt;</span>
-                    <span
-                      className="inline-block"
-                      style={{
-                        width: 6,
-                        height: 12,
-                        backgroundColor: TRADER_CONFIG[activeTrader.id].accent,
-                        animation: "cursorBlink 1s step-end infinite",
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
 
-              {activeModal.type === "journal" && activeTrader && (
-                <div className="flex flex-col gap-5 text-primary">
-                  <div className="flex flex-col gap-1">
-                    <div className="text-secondary">[2026-06-14] Entry 001</div>
-                    <div className="text-[#333]">{"─".repeat(32)}</div>
-                    <div>Session started. Bias set to {activeTrader.bias.toUpperCase()}.</div>
-                    <div>No trades taken. Observing structure.</div>
-                    <div>Confidence level: {activeTrader.confidence}</div>
-                    <div>Strategy version: {activeTrader.strategyVersion}</div>
+              {/* ── PC View ──────────────────────────────────────────────── */}
+              {activeModal.type === "pc" && activeTrader && (() => {
+                const cfg = TRADER_CONFIG[activeTrader.id];
+                const pos = activeTrader.openPosition;
+                return (
+                  <div className="flex flex-col gap-[6px] font-mono" style={{ color: cfg.accent }}>
+                    <div className="text-[7px] text-muted-foreground mb-1">─────────────────────────────────</div>
+                    <div>&gt; TRADER: {activeTrader.name}</div>
+                    <div>&gt; STRATEGY: {activeTrader.strategyVersion} — {activeTrader.strategyFocus}</div>
+                    <div>&gt; STATUS: {activeTrader.status}</div>
+                    <div>&gt; TIMEFRAMES: {activeTrader.timeframesReviewed.join(", ")}</div>
+                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
+                    <div>&gt; BIAS: {activeTrader.bias.toUpperCase()} ({activeTrader.confidence}% confidence)</div>
+                    <div>&gt; ACTION: {activeTrader.currentAction}</div>
+                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
+                    <div className="text-[7px] text-muted-foreground">INTERNAL REASONING:</div>
+                    <div className="text-[7px] leading-relaxed pl-2 opacity-90">{activeTrader.internalReasoning}</div>
+                    <div className="text-[7px] text-muted-foreground mt-1">ALTERNATIVE SCENARIO:</div>
+                    <div className="text-[7px] leading-relaxed pl-2 opacity-80">{activeTrader.alternativeScenario}</div>
+                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
+                    <div>&gt; LAST DECISION: {activeTrader.recentDecision}</div>
+                    {pos ? (
+                      <>
+                        <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
+                        <div className="text-[7px] text-muted-foreground">OPEN POSITION:</div>
+                        <div className="pl-2 flex flex-col gap-[3px] text-[7px]">
+                          <div>&gt; {pos.direction} @ {pos.entryPrice.toFixed(1)}</div>
+                          <div>&gt; SL: {pos.stopLoss.toFixed(1)} | TP: {pos.takeProfit.toFixed(1)}</div>
+                          <div>&gt; SIZE: {pos.size.toFixed(3)} lots</div>
+                          <div style={{ color: pos.unrealizedPL >= 0 ? "#00ff88" : "#ff4444" }}>
+                            &gt; UNREAL P/L: {fmtPL(pos.unrealizedPL)}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div>&gt; POSITION: NONE</div>
+                    )}
+                    {activeTrader.closedTrades.length > 0 && (
+                      <>
+                        <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
+                        <div className="text-[7px] text-muted-foreground">RECENT TRADE:</div>
+                        <div className="pl-2 text-[7px] flex flex-col gap-[2px]">
+                          <div>&gt; {activeTrader.closedTrades[0].direction} {activeTrader.closedTrades[0].entryPrice.toFixed(0)} → {activeTrader.closedTrades[0].exitPrice.toFixed(0)}</div>
+                          <div style={{ color: activeTrader.closedTrades[0].result >= 0 ? "#00ff88" : "#ff4444" }}>
+                            &gt; RESULT: {activeTrader.closedTrades[0].rMultiple >= 0 ? "+" : ""}{activeTrader.closedTrades[0].rMultiple.toFixed(1)}R ({fmtPL(activeTrader.closedTrades[0].result)})
+                          </div>
+                          <div className="text-muted-foreground">&gt; REASON: {activeTrader.closedTrades[0].reason}</div>
+                        </div>
+                      </>
+                    )}
+                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
+                    <div>&gt; BALANCE: {fmtBal(activeTrader.balance)}</div>
+                    <div className="mt-3 flex items-center gap-1">
+                      <span>&gt;</span>
+                      <span className="inline-block" style={{ width: 6, height: 12, backgroundColor: cfg.accent, animation: "cursorBlink 1s step-end infinite" }} />
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="text-secondary">[2026-06-14] Entry 002</div>
-                    <div className="text-[#333]">{"─".repeat(32)}</div>
-                    <div>Reviewed previous session results.</div>
-                    <div>Focus area: patience and entry timing.</div>
-                    <div>Next session target: Clean execution.</div>
-                    <div>Risk limit confirmed: 1% max per trade.</div>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="text-secondary">[2026-06-13] Entry 003</div>
-                    <div className="text-[#333]">{"─".repeat(32)}</div>
-                    <div>Mental state: focused. No emotional trades.</div>
-                    <div>Bias was invalidated at 43,050. Stayed out.</div>
-                    <div>Discipline score: PASS.</div>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
+              {/* ── Journal ──────────────────────────────────────────────── */}
+              {activeModal.type === "journal" && activeTrader && (() => {
+                const cfg = TRADER_CONFIG[activeTrader.id];
+                const today = new Date().toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" });
+                return (
+                  <div className="flex flex-col gap-5" style={{ color: cfg.accent }}>
+                    <div>
+                      <div className="text-secondary">[{today}] Entry {String(1 + (activeTrader.closedTrades.length)).padStart(3, "0")}</div>
+                      <div className="text-[#222]">{"─".repeat(32)}</div>
+                      <div>Session started. Current bias: {activeTrader.bias.toUpperCase()}.</div>
+                      <div>Confidence: {activeTrader.confidence}%.</div>
+                      <div>Strategy focus: {activeTrader.strategyFocus}.</div>
+                      <div>{activeTrader.currentAction}.</div>
+                    </div>
+                    {activeTrader.closedTrades.slice(0, 3).map((t, i) => (
+                      <div key={i}>
+                        <div className="text-secondary">[{today}] Trade Log #{i + 1}</div>
+                        <div className="text-[#222]">{"─".repeat(32)}</div>
+                        <div>{t.direction} @ {t.entryPrice.toFixed(0)} → {t.exitPrice.toFixed(0)}</div>
+                        <div style={{ color: t.result >= 0 ? "#00ff88" : "#ff4444" }}>
+                          Result: {t.rMultiple >= 0 ? "+" : ""}{t.rMultiple.toFixed(1)}R ({fmtPL(t.result)})
+                        </div>
+                        <div className="text-muted-foreground">Reason: {t.reason}</div>
+                      </div>
+                    ))}
+                    {activeTrader.closedTrades.length === 0 && (
+                      <div>
+                        <div className="text-secondary">[{today}] Entry 001</div>
+                        <div className="text-[#222]">{"─".repeat(32)}</div>
+                        <div>No trades taken yet. Observing structure.</div>
+                        <div>Focus area: patience and entry timing.</div>
+                        <div>Next session target: clean execution.</div>
+                        <div>Risk limit: 1% per trade.</div>
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-muted-foreground">[NOTE] {activeTrader.internalReasoning}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Chat ─────────────────────────────────────────────────── */}
               {activeModal.type === "chat" && (
                 <div className="flex flex-col h-full">
                   <div className="flex-1 flex flex-col gap-[6px]">
                     {[
-                      { time: "08:12", name: "FLOOR_MASTER", color: "#00ccff", msg: "Morning briefing starting. All traders check in." },
-                      { time: "08:13", name: "ICT_TRADER", color: TRADER_CONFIG.ict.accent, msg: "Checked in. Bias BULLISH above 43,100." },
-                      { time: "08:15", name: "TREND_TRADER", color: TRADER_CONFIG.trend.accent, msg: "Watching 4H close for structure confirmation." },
-                      { time: "08:18", name: "BREAKOUT_TRADER", color: TRADER_CONFIG.breakout.accent, msg: "Yesterday's stop hunt at 43,050 noted." },
-                      { time: "08:20", name: "FLOOR_MASTER", color: "#00ccff", msg: "Risk below 1% today. Stay disciplined." },
-                      { time: "08:28", name: "SYSTEM", color: "#888888", msg: "Market opens in 62 minutes." },
+                      { time: "08:12", name: "FLOOR_MASTER", color: "#00ccff", msg: "Morning briefing. All traders check in." },
+                      { time: "08:13", name: "ICT_TRADER", color: TRADER_CONFIG.ict.accent, msg: `Checked in. Bias ${traderStates[0].bias.toUpperCase()}. Confidence ${traderStates[0].confidence}%.` },
+                      { time: "08:15", name: "TREND_TRADER", color: TRADER_CONFIG.trend.accent, msg: `${traderStates[1].currentAction}.` },
+                      { time: "08:18", name: "BREAKOUT_TRADER", color: TRADER_CONFIG.breakout.accent, msg: `${traderStates[2].currentAction}.` },
+                      { time: "08:20", name: "FLOOR_MASTER", color: "#00ccff", msg: "Risk below 1% today. Stay disciplined. No FOMO." },
+                      { time: "08:28", name: "SYSTEM", color: "#555", msg: `Simulation active. Cycle #${cycleCounterRef.current}. Next cycle in ~${nextCycleIn}s.` },
                     ].map((entry, i) => (
                       <div key={i} className="flex gap-2 items-baseline">
                         <span className="text-muted-foreground shrink-0 text-[7px]">[{entry.time}]</span>
-                        <span className="font-bold shrink-0" style={{ color: entry.color }}>
-                          {entry.name}:
-                        </span>
+                        <span className="font-bold shrink-0" style={{ color: entry.color }}>{entry.name}:</span>
                         <span>{entry.msg}</span>
                       </div>
                     ))}
                   </div>
                   <div className="mt-5 border-t border-border pt-3 flex items-center gap-2">
                     <span className="text-primary">&gt;</span>
-                    <input
-                      type="text"
-                      placeholder="[type message...]"
-                      className="bg-transparent border-none outline-none flex-1 text-[8px] text-foreground"
-                      data-testid="chat-input"
-                    />
-                    <button
-                      className="border border-primary px-3 py-1 text-primary text-[8px] hover:bg-primary/20 transition-all"
-                      data-testid="btn-send-chat"
-                    >
-                      [SEND]
-                    </button>
+                    <input type="text" placeholder="[type message...]" className="bg-transparent border-none outline-none flex-1 text-[8px] text-foreground" data-testid="chat-input" />
+                    <button className="border border-primary px-3 py-1 text-primary text-[8px] hover:bg-primary/20 transition-all" data-testid="btn-send-chat">[SEND]</button>
                   </div>
                 </div>
               )}
 
+              {/* ── Demote ───────────────────────────────────────────────── */}
               {activeModal.type === "demote" && activeTrader && (
                 <div className="flex flex-col gap-6 items-center justify-center py-8 text-center">
                   <div className="text-destructive leading-loose text-[8px]">
                     WARNING: You are about to DEMOTE<br />
-                    <span style={{ color: TRADER_CONFIG[activeTrader.id].accent }}>
-                      {activeTrader.name}
-                    </span>.<br />
+                    <span style={{ color: TRADER_CONFIG[activeTrader.id].accent }}>{activeTrader.name}</span>.<br />
                     This action will be logged in the system.
                   </div>
                   <div className="flex gap-4">
-                    <button
-                      onClick={closeModal}
-                      className="border border-border px-4 py-2 text-[8px] hover:bg-white/10 transition-all"
-                      data-testid="btn-demote-cancel"
-                    >
-                      [CANCEL]
-                    </button>
-                    <button
-                      onClick={closeModal}
-                      className="border border-destructive text-destructive px-4 py-2 text-[8px] hover:bg-destructive/20 transition-all"
-                      style={{ boxShadow: "0 0 10px rgba(255,0,0,0.4)" }}
-                      data-testid="btn-demote-confirm"
-                    >
-                      [CONFIRM]
-                    </button>
+                    <button onClick={closeModal} className="border border-border px-4 py-2 text-[8px] hover:bg-white/10 transition-all" data-testid="btn-demote-cancel">[CANCEL]</button>
+                    <button onClick={closeModal} className="border border-destructive text-destructive px-4 py-2 text-[8px] hover:bg-destructive/20 transition-all" style={{ boxShadow: "0 0 10px rgba(255,0,0,0.4)" }} data-testid="btn-demote-confirm">[CONFIRM]</button>
                   </div>
                 </div>
               )}
+
             </div>
           </div>
         </div>

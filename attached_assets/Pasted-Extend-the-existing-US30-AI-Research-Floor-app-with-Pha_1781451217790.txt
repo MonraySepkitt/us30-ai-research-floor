@@ -1,0 +1,184 @@
+Extend the existing US30 AI Research Floor app with Phase 2.
+
+IMPORTANT:
+Do not redesign the app.
+Do not change the current visual style.
+Do not remove existing buttons, cards, modals, clock, trading floor, or activity log.
+Only add the simulated trader engine and connect it to the existing UI.
+
+PHASE 2 GOAL:
+Make the 3 traders feel alive using demo US30 data and mock/rule-based logic.
+No real AI API.
+No real market API.
+No backend required unless already used.
+
+1. Demo US30 Candle Data
+
+Add demo US30 OHLCV candle data inside the app.
+
+Requirements:
+- Generate at least 50 sample candles.
+- Price range around 38,000–39,500.
+- Include 1H and 4H timeframe data.
+- Each candle should include:
+  - time
+  - open
+  - high
+  - low
+  - close
+  - volume
+- Use realistic-looking random/procedural movement, not completely chaotic movement.
+
+2. Trader Simulation Engine
+
+Create a simulated trader engine that runs automatically on a timer.
+
+Timer:
+- Every 30–60 seconds, run one simulation cycle.
+
+Each cycle, each trader independently:
+- Reviews demo candles.
+- Selects which timeframe/timeframes matter.
+- Produces:
+  - Bias: Bullish / Bearish / Neutral
+  - Confidence: 0–100
+  - Status: ANALYZING / THINKING / WAITING / RESEARCHING / DISCUSSING / IN TRADE
+  - Current action
+  - Internal reasoning
+  - Recent decision
+  - Open position decision: enter / hold / close / skip
+
+3. Trader Strategy Logic
+
+Use mock/rule-based strategy logic for now.
+
+ICT Trader:
+- Focus on liquidity sweeps, fair value gaps, order blocks, session timing.
+- Should be patient and selective.
+- Often skips trades if liquidity or confirmation is missing.
+
+Trend Trader:
+- Focus on higher-timeframe direction, pullbacks, momentum, continuation.
+- Should prefer trading with trend.
+- Should be moderately active.
+
+Breakout Trader:
+- Focus on ranges, consolidation, breakout, retest, volatility expansion.
+- Should be more aggressive than the others.
+- Should watch for compression and range breaks.
+
+4. Paper Trading
+
+Each trader must have:
+- Starting balance: R1,000
+- Open position object:
+  - direction
+  - entry price
+  - size
+  - stop loss
+  - take profit
+  - entry time
+  - unrealized P/L
+- Closed trade history:
+  - entry
+  - exit
+  - direction
+  - result
+  - R multiple
+  - balance change
+  - reason
+
+Trading must be simulated only.
+
+Rules:
+- Traders can enter, hold, close, or skip.
+- Do not allow unlimited trades.
+- A trader should not open a second trade if already in a position.
+- Use simple mock P/L calculations.
+- Update balance when trades close.
+- Show open position and current P/L in the UI.
+
+5. Connect Engine To Existing UI
+
+Update the existing dashboard so trader cards show live simulated state:
+
+- Balance
+- Status
+- Current action
+- Bias
+- Confidence
+- Open position
+- Strategy version
+
+Update the activity log so it uses real simulated trader events instead of only hardcoded messages.
+
+Examples:
+- ICT Trader skipped trade: liquidity sweep not confirmed.
+- Trend Trader changed bias to Bullish after 4H candle close.
+- Breakout Trader entered BUY after range breakout.
+- ICT Trader closed SELL for +1.4R.
+
+6. PC View Must Show Real Trader State
+
+When opening a trader’s PC view, show:
+
+- Current activity
+- Timeframes reviewed
+- Bias
+- Confidence
+- Internal reasoning
+- Alternative scenario
+- Current decision
+- Open position
+- Current P/L
+- Recent trade
+- Current strategy focus
+
+This data must come from the simulated trader engine, not static placeholder text.
+
+7. Activity Log
+
+Activity log must:
+- Use SAST timestamps.
+- Update automatically when trader events happen.
+- Keep the latest events visible.
+- Keep the retro terminal style.
+- Avoid overflowing or breaking mobile layout.
+
+8. State Management
+
+Use clean state management.
+
+Prefer:
+- Separate utility/helper file for demo candle generation.
+- Separate utility/helper file for trader simulation logic.
+- Keep components clean.
+
+Suggested files:
+- src/data/demoMarketData.js
+- src/simulation/traderEngine.js
+- src/simulation/traderStrategies.js
+
+Only create these if compatible with the existing project structure.
+
+9. Do Not Build Yet
+
+Do not implement:
+- Real AI API
+- Real market data
+- Backtesting engine
+- Scientific validation
+- Rehabilitation workflow
+- Trader chat intelligence
+- Strategy evolution
+- Settings API connection
+
+Those are later phases.
+
+10. After Implementation
+
+Explain:
+- What files were changed or created.
+- How the simulation timer works.
+- How trader decisions are generated.
+- How paper balances are updated.
