@@ -472,6 +472,16 @@ export default function TradingFloor() {
                   [OPEN JOURNAL]
                 </button>
                 <button
+                  className="w-full p-2 text-[8px] transition-all border"
+                  style={{ borderColor: "#ffaa00", color: "#ffaa00" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "0 0 10px rgba(255,170,0,0.4)"; (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,170,0,0.1)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "none"; (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
+                  onClick={() => openModal("history", trader.id)}
+                  data-testid={`btn-history-${trader.id}`}
+                >
+                  [TRADE HISTORY] {trader.closedTrades.length > 0 ? `(${trader.closedTrades.length})` : ""}
+                </button>
+                <button
                   className="w-full border border-destructive text-destructive p-2 text-[8px] transition-all"
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "0 0 10px rgba(255,0,0,0.4)"; (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,0,0,0.1)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = "none"; (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
@@ -516,6 +526,7 @@ export default function TradingFloor() {
               <h2 className="text-[9px] text-primary">
                 {activeModal.type === "chat" ? "// TRADING FLOOR CHAT"
                   : activeModal.type === "demote" ? "// SYSTEM ALERT"
+                  : activeModal.type === "history" ? `// ${activeTrader?.name} — TRADE HISTORY`
                   : `// ${activeTrader?.name} — ${activeModal.type === "pc" ? "PC VIEW" : "JOURNAL"}`}
               </h2>
               <button onClick={closeModal} className="text-primary hover:text-white text-[9px] px-2" data-testid="btn-close-modal">[X]</button>
@@ -651,6 +662,215 @@ export default function TradingFloor() {
                   </div>
                 </div>
               )}
+
+              {/* ── Trade History ────────────────────────────────────────── */}
+              {activeModal.type === "history" && activeTrader && (() => {
+                const cfg = TRADER_CONFIG[activeTrader.id];
+                const trades = activeTrader.closedTrades;
+                const wins = trades.filter((t) => t.result >= 0).length;
+                const losses = trades.length - wins;
+                const winRate = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
+                const totalPL = trades.reduce((s, t) => s + t.balanceChange, 0);
+                const bestTrade = trades.length > 0 ? trades.reduce((b, t) => t.rMultiple > b.rMultiple ? t : b) : null;
+                const worstTrade = trades.length > 0 ? trades.reduce((w, t) => t.rMultiple < w.rMultiple ? t : w) : null;
+
+                // running balance (trades are newest-first, so reverse to replay)
+                const ordered = [...trades].reverse();
+                const startBal = 1000;
+                const runningBals: number[] = [];
+                let bal = startBal;
+                for (const t of ordered) {
+                  bal += t.balanceChange;
+                  runningBals.push(Math.round(bal * 100) / 100);
+                }
+                runningBals.reverse();
+
+                // streak
+                let streak = 0;
+                let streakType = "";
+                for (const t of trades) {
+                  if (streak === 0) { streakType = t.result >= 0 ? "W" : "L"; streak = 1; }
+                  else if ((t.result >= 0 && streakType === "W") || (t.result < 0 && streakType === "L")) streak++;
+                  else break;
+                }
+
+                return (
+                  <div className="flex flex-col gap-4" style={{ color: cfg.accent }}>
+
+                    {/* Summary stats */}
+                    <div className="border p-3 flex flex-col gap-2" style={{ borderColor: cfg.accent + "44", backgroundColor: cfg.accent + "08" }}>
+                      <div className="text-[7px] text-muted-foreground mb-1">PERFORMANCE SUMMARY</div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[8px]">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted-foreground">TRADES:</span>
+                          <span>{trades.length}</span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted-foreground">WIN RATE:</span>
+                          <span style={{ color: winRate >= 50 ? "#00ff88" : "#ff4444" }}>{winRate}%</span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted-foreground">WINS:</span>
+                          <span style={{ color: "#00ff88" }}>{wins}</span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted-foreground">LOSSES:</span>
+                          <span style={{ color: "#ff4444" }}>{losses}</span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted-foreground">TOTAL P/L:</span>
+                          <span style={{ color: totalPL >= 0 ? "#00ff88" : "#ff4444" }}>
+                            {totalPL >= 0 ? "+" : ""}R{totalPL.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-muted-foreground">BALANCE:</span>
+                          <span>{fmtBal(activeTrader.balance)}</span>
+                        </div>
+                        {bestTrade && (
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">BEST:</span>
+                            <span style={{ color: "#00ff88" }}>+{bestTrade.rMultiple.toFixed(1)}R</span>
+                          </div>
+                        )}
+                        {worstTrade && (
+                          <div className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">WORST:</span>
+                            <span style={{ color: "#ff4444" }}>{worstTrade.rMultiple.toFixed(1)}R</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Win/loss streak */}
+                      {streak > 0 && (
+                        <div className="flex items-center gap-2 mt-1 pt-2 border-t" style={{ borderColor: cfg.accent + "33" }}>
+                          <span className="text-[7px] text-muted-foreground">CURRENT STREAK:</span>
+                          <div className="flex gap-[3px]">
+                            {Array.from({ length: Math.min(streak, 8) }).map((_, i) => (
+                              <div
+                                key={i}
+                                style={{
+                                  width: 8, height: 8,
+                                  backgroundColor: streakType === "W" ? "#00ff88" : "#ff4444",
+                                  opacity: 1 - (Math.min(streak, 8) - 1 - i) * 0.1,
+                                }}
+                              />
+                            ))}
+                          </div>
+                          <span
+                            className="text-[7px]"
+                            style={{ color: streakType === "W" ? "#00ff88" : "#ff4444" }}
+                          >
+                            {streak}{streakType} STREAK
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Mini equity bar */}
+                      {trades.length > 0 && (
+                        <div className="mt-1 pt-2 border-t" style={{ borderColor: cfg.accent + "33" }}>
+                          <div className="text-[7px] text-muted-foreground mb-1">EQUITY CURVE</div>
+                          <div className="flex items-end gap-[2px] h-[20px]">
+                            {[startBal, ...runningBals.slice().reverse()].map((b, i) => {
+                              const min = Math.min(startBal, ...runningBals);
+                              const max = Math.max(startBal, ...runningBals);
+                              const range = Math.max(max - min, 1);
+                              const pct = Math.round(((b - min) / range) * 18) + 2;
+                              return (
+                                <div
+                                  key={i}
+                                  style={{
+                                    width: 4, height: pct,
+                                    backgroundColor: b >= startBal ? "#00ff88" : "#ff4444",
+                                    opacity: 0.85,
+                                  }}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Trade table */}
+                    {trades.length === 0 ? (
+                      <div className="text-[8px] text-muted-foreground text-center py-6">
+                        No closed trades yet.<br />
+                        <span style={{ color: cfg.accent }}>Simulation running...</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-0">
+                        {/* Table header */}
+                        <div
+                          className="grid text-[7px] text-muted-foreground pb-1 mb-1 border-b"
+                          style={{
+                            gridTemplateColumns: "1.2rem 3.5rem 3.5rem 3.5rem 2.5rem 3rem 1fr",
+                            borderColor: cfg.accent + "33",
+                          }}
+                        >
+                          <span>#</span>
+                          <span>DIR</span>
+                          <span>ENTRY</span>
+                          <span>EXIT</span>
+                          <span>R</span>
+                          <span>P/L</span>
+                          <span>BAL AFTER</span>
+                        </div>
+
+                        {/* Table rows (newest first) */}
+                        {trades.map((t, i) => {
+                          const isWin = t.result >= 0;
+                          const rowBal = runningBals[i];
+                          return (
+                            <div
+                              key={i}
+                              className="grid py-[3px] border-b text-[7px]"
+                              style={{
+                                gridTemplateColumns: "1.2rem 3.5rem 3.5rem 3.5rem 2.5rem 3rem 1fr",
+                                borderColor: cfg.accent + "18",
+                                backgroundColor: i % 2 === 0 ? cfg.accent + "05" : "transparent",
+                              }}
+                            >
+                              <span className="text-muted-foreground">{trades.length - i}</span>
+                              <span style={{ color: t.direction === "BUY" ? "#00ff88" : "#ff4444" }}>
+                                {t.direction}
+                              </span>
+                              <span>{t.entryPrice.toFixed(0)}</span>
+                              <span>{t.exitPrice.toFixed(0)}</span>
+                              <span style={{ color: isWin ? "#00ff88" : "#ff4444" }}>
+                                {isWin ? "+" : ""}{t.rMultiple.toFixed(1)}R
+                              </span>
+                              <span style={{ color: isWin ? "#00ff88" : "#ff4444" }}>
+                                {isWin ? "+" : ""}R{t.result.toFixed(0)}
+                              </span>
+                              <span style={{ color: rowBal >= startBal ? "#00ff88" : "#ff4444" }}>
+                                {fmtBal(rowBal)}
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {/* Reason column separately */}
+                        <div className="mt-3">
+                          <div className="text-[7px] text-muted-foreground mb-1">TRADE NOTES</div>
+                          {trades.map((t, i) => (
+                            <div key={i} className="flex gap-2 text-[7px] py-[2px] border-b" style={{ borderColor: cfg.accent + "18" }}>
+                              <span className="text-muted-foreground shrink-0">#{trades.length - i}</span>
+                              <span
+                                className="shrink-0"
+                                style={{ color: t.result >= 0 ? "#00ff88" : "#ff4444" }}
+                              >
+                                {t.direction}
+                              </span>
+                              <span className="text-muted-foreground">{t.reason}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* ── Demote ───────────────────────────────────────────────── */}
               {activeModal.type === "demote" && activeTrader && (
