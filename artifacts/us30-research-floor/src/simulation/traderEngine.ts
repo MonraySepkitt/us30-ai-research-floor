@@ -32,6 +32,18 @@ export interface ClosedTrade {
   exitTime: number;
 }
 
+export interface ReasoningEntry {
+  time: string;
+  note: string;
+}
+
+export interface RiskPlan {
+  entryArea: string;
+  invalidation: string;
+  target: string;
+  rr: string;
+}
+
 export interface TraderState {
   id: TraderId;
   name: string;
@@ -45,6 +57,18 @@ export interface TraderState {
   timeframesReviewed: string[];
   strategyFocus: string;
   alternativeScenario: string;
+  // ── Deep thinking fields ──────────────────────────────────────────────────
+  thesis: string;
+  marketNarrative: string;
+  bullCase: string;
+  bearCase: string;
+  waitingFor: string;
+  tradeTrigger: string;
+  noTradeReason: string;
+  riskPlan: RiskPlan;
+  whatWouldChangeMind: string;
+  reasoningMemory: ReasoningEntry[];
+  // ── Trading ───────────────────────────────────────────────────────────────
   openPosition: Position | null;
   closedTrades: ClosedTrade[];
   balance: number;
@@ -66,12 +90,28 @@ export function getInitialTraderStates(): TraderState[] {
       bias: 'Bullish',
       confidence: 72,
       currentAction: 'Waiting for OTE setup on 15M',
-      internalReasoning:
-        'Price above 4H order block. Watching for liquidity sweep above recent high.',
+      internalReasoning: 'Price above 4H order block. Watching for liquidity sweep above recent high.',
       recentDecision: 'Skipped — liquidity sweep not confirmed',
       timeframesReviewed: ['4H', '1H'],
       strategyFocus: 'Order blocks & FVGs',
       alternativeScenario: 'If price drops below 38,600, flip to bearish',
+      thesis: 'Bullish continuation likely after liquidity sweep below current low.',
+      marketNarrative: 'US30 is holding above the 4H discount zone. Short-term liquidity remains below the current range. Not interested in chasing price until a clean sweep and reclaim forms.',
+      bullCase: 'Sweep below short-term low, bullish MSS on 15M, then FVG entry.',
+      bearCase: 'Failure to reclaim after sweep and break below 4H support level.',
+      waitingFor: 'Liquidity sweep below current range low + 15M market structure shift.',
+      tradeTrigger: 'Bullish FVG retracement entry after MSS confirmation.',
+      noTradeReason: 'Session timing not optimal and liquidity has not been taken yet.',
+      riskPlan: {
+        entryArea: 'Premium zone after MSS, ~38,650–38,700',
+        invalidation: 'Clean 4H close below 38,500',
+        target: 'Nearest opposing liquidity at swing high',
+        rr: '1:2 minimum, targeting 2R',
+      },
+      whatWouldChangeMind: 'A clean 4H candle close below 38,500 would fully invalidate the bullish bias.',
+      reasoningMemory: [
+        { time: '--:--', note: 'Simulation initialised. Bias set to Bullish. Monitoring 4H structure.' },
+      ],
       openPosition: null,
       closedTrades: [],
       balance: 1000,
@@ -85,12 +125,28 @@ export function getInitialTraderStates(): TraderState[] {
       bias: 'Neutral',
       confidence: 55,
       currentAction: 'Monitoring 4H structure break',
-      internalReasoning:
-        'SMA20 and SMA50 converging on 1H. Waiting for clear directional close.',
+      internalReasoning: 'SMA20 and SMA50 converging on 1H. Waiting for clear directional close.',
       recentDecision: 'No trade — trend not confirmed',
       timeframesReviewed: ['4H', '1H'],
       strategyFocus: 'SMA trend & momentum',
       alternativeScenario: 'If 4H closes above 38,900, look for 1H pullback entry',
+      thesis: 'Neutral until SMAs give clear separation. No trade in choppy market.',
+      marketNarrative: 'US30 is in a transitional phase. SMA20 and SMA50 are converging, suggesting indecision. Will not enter until trend is clearly re-established on 1H.',
+      bullCase: 'SMA20 crosses above SMA50 with price maintaining higher highs on 1H.',
+      bearCase: 'SMA20 crosses below SMA50 with 3+ bearish closes confirming downtrend.',
+      waitingFor: 'SMA stack alignment: price > SMA20 > SMA50 with momentum confirmation.',
+      tradeTrigger: '3+ consecutive bullish candles on 1H while price pulls back to SMA20.',
+      noTradeReason: 'SMAs too close together — trend not confirmed in either direction.',
+      riskPlan: {
+        entryArea: 'Pullback to SMA20 from above or below',
+        invalidation: 'SMA20 crossing SMA50 in opposite direction',
+        target: 'Previous swing high/low with 1.5R minimum',
+        rr: '1:1.5 baseline, extending to 1:2 in strong trend',
+      },
+      whatWouldChangeMind: 'SMA crossover in the opposite direction to any active bias would force a re-evaluation.',
+      reasoningMemory: [
+        { time: '--:--', note: 'Simulation initialised. Neutral stance. Waiting for SMA alignment.' },
+      ],
       openPosition: null,
       closedTrades: [],
       balance: 1000,
@@ -104,12 +160,28 @@ export function getInitialTraderStates(): TraderState[] {
       bias: 'Bearish',
       confidence: 40,
       currentAction: 'Reviewing last 3 losses',
-      internalReasoning:
-        'Compression forming on 1H. ATR contracting. Waiting for breakout trigger.',
+      internalReasoning: 'Compression forming on 1H. ATR contracting. Waiting for breakout trigger.',
       recentDecision: 'Entered early — range not fully formed',
       timeframesReviewed: ['1H'],
       strategyFocus: 'Range breakout & volatility',
       alternativeScenario: 'If range holds 3+ more candles, breakout probability increases',
+      thesis: 'Neutral until range breaks. Bearish lean based on recent price action.',
+      marketNarrative: 'US30 is forming a compression range on 1H. ATR is contracting. I am watching for the first clean breakout candle with volume expansion. Will not trade until range is clearly defined.',
+      bullCase: 'Clean break above range high with strong bullish close and volume.',
+      bearCase: 'Break below range low with immediate follow-through and no re-entry.',
+      waitingFor: 'Range to tighten further, then a clean close outside the range boundaries.',
+      tradeTrigger: 'Candle close outside range by at least 0.15 ATR with no wick back inside.',
+      noTradeReason: 'Currently in rehab protocol. Reviewing process before next trade.',
+      riskPlan: {
+        entryArea: 'Just beyond range boundary on breakout confirmation',
+        invalidation: 'Price re-enters range after breakout (false break)',
+        target: 'Range size projected from breakout point',
+        rr: '1:2 targeting full range projection',
+      },
+      whatWouldChangeMind: 'A false breakout followed by range re-entry would reset the entire setup.',
+      reasoningMemory: [
+        { time: '--:--', note: 'Simulation initialised. In rehab. Reviewing previous losses.' },
+      ],
       openPosition: null,
       closedTrades: [],
       balance: 1000,
@@ -119,6 +191,22 @@ export function getInitialTraderStates(): TraderState[] {
 }
 
 // ─── Position management ───────────────────────────────────────────────────
+
+function getSASTHHMM(): string {
+  return new Intl.DateTimeFormat('en-ZA', {
+    timeZone: 'Africa/Johannesburg',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date());
+}
+
+export function appendReasoning(
+  memory: ReasoningEntry[],
+  note: string
+): ReasoningEntry[] {
+  return [{ time: getSASTHHMM(), note }, ...memory].slice(0, 10);
+}
 
 export function checkAndUpdatePosition(
   state: TraderState,
@@ -155,6 +243,11 @@ export function checkAndUpdatePosition(
       rMult >= 0
         ? `closed ${pos.direction} at ${exitPrice.toFixed(0)} — TP hit +${rMult.toFixed(1)}R (R${sign}${pnl.toFixed(0)})`
         : `stopped out ${pos.direction} at ${exitPrice.toFixed(0)} — SL hit -1R (R${pnl.toFixed(0)})`;
+
+    const memNote = rMult >= 0
+      ? `TP hit on ${pos.direction} at ${exitPrice.toFixed(0)}. +${rMult.toFixed(1)}R. Process confirmed.`
+      : `SL hit on ${pos.direction} at ${exitPrice.toFixed(0)}. -1R. Reviewing execution.`;
+
     return {
       state: {
         ...state,
@@ -164,6 +257,8 @@ export function checkAndUpdatePosition(
         status: 'ANALYZING',
         currentAction: rMult >= 0 ? 'Reviewing winning trade' : 'Reviewing loss — checking process',
         recentDecision: msg,
+        noTradeReason: rMult >= 0 ? 'Last trade closed in profit. Re-scanning for next setup.' : 'Last trade stopped out. Running post-trade review.',
+        reasoningMemory: appendReasoning(state.reasoningMemory, memNote),
       },
       event: { traderId: state.id, msg },
     };

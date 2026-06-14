@@ -1,0 +1,98 @@
+Extend the existing Open PC screen.
+
+Do not redesign the app.
+Do not change the current retro terminal style.
+Do not remove existing PC data.
+Only add deeper trader thinking fields and make the PC view feel like a live trader workstation.
+
+Add these fields to each trader’s internal state:
+
+1. Current Thesis
+Example:
+- Bullish continuation likely, but only after liquidity sweep.
+- Bearish pressure building below 4H resistance.
+- Neutral until range breaks.
+
+2. Current Market Narrative
+A short paragraph explaining what the trader believes is happening on US30 right now.
+
+3. Bull Case
+What would support a buy scenario?
+
+4. Bear Case
+What would support a sell scenario?
+
+5. Waiting For
+What exact condition the trader needs before entering.
+
+6. Trade Trigger
+The specific setup that would make the trader enter.
+
+7. No-Trade Reason
+Why the trader is currently not trading, if position is none.
+
+8. Risk Plan
+Show planned risk logic:
+- estimated entry area
+- invalidation area
+- target idea
+- risk-to-reward expectation
+
+9. Recent Reasoning Memory
+Store the last 10 reasoning updates per trader.
+Show them in the PC view as a small terminal-style log.
+
+Example:
+[17:51] Liquidity below current range remains unswept.
+[17:52] 4H structure remains bullish.
+[17:53] No entry until 15M market structure shift confirms.
+
+10. What Would Change My Mind
+A short field explaining what condition would invalidate the trader’s current bias.
+
+Update the simulation engine so these fields evolve every cycle based on:
+- trader strategy type
+- current demo candle data
+- current bias
+- confidence
+- open position state
+- previous reasoning memory
+
+Important:
+Do not generate completely random text every cycle.
+Make the reasoning feel connected and progressive.
+
+Example PC view structure:
+
+CURRENT THESIS:
+Bullish continuation possible after liquidity sweep.
+
+MARKET NARRATIVE:
+US30 is holding above the 4H discount zone, but short-term liquidity remains below the current range. I am not interested in chasing price until a clean sweep and reclaim forms.
+
+BULL CASE:
+Sweep below short-term low, bullish MSS, then FVG entry.
+
+BEAR CASE:
+Failure to reclaim after sweep and break below 4H support.
+
+WAITING FOR:
+Liquidity sweep + 15M market structure shift.
+
+TRADE TRIGGER:
+Bullish FVG retracement after MSS confirmation.
+
+NO-TRADE REASON:
+Session timing is not optimal and liquidity has not been taken.
+
+RISK PLAN:
+Risk 0.5% of balance. Stop below sweep low. Target nearest opposing liquidity.
+
+WHAT WOULD CHANGE MY MIND:
+A clean 4H close below support would invalidate my bullish bias.
+
+RECENT REASONING MEMORY:
+Show latest 10 reasoning updates with SAST timestamps.
+
+Keep the PC modal mobile-friendly.
+Use collapsible sections if the content becomes too long.

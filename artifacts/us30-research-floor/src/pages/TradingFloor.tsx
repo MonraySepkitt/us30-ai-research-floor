@@ -178,6 +178,158 @@ function TraderDesk({ trader }: { trader: TraderState }) {
   );
 }
 
+// ─── PC View component (collapsible sections) ─────────────────────────────
+
+function PCSection({
+  title, accent, defaultOpen = true, children,
+}: {
+  title: string; accent: string; defaultOpen?: boolean; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-b" style={{ borderColor: accent + "33" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex justify-between items-center py-[5px] px-0 text-left"
+      >
+        <span className="text-[7px]" style={{ color: accent }}>{title}</span>
+        <span className="text-[7px] text-muted-foreground">{open ? "[-]" : "[+]"}</span>
+      </button>
+      {open && (
+        <div className="pb-3 pl-1 flex flex-col gap-[5px] text-[7px] leading-relaxed">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PCView({ trader, accent }: { trader: TraderState; accent: string }) {
+  const pos = trader.openPosition;
+  return (
+    <div className="flex flex-col gap-0 font-mono text-[7px]" style={{ color: accent }}>
+
+      {/* ── Header block ─────────────────────────────────── */}
+      <div className="flex flex-col gap-[4px] pb-3 mb-1 border-b" style={{ borderColor: accent + "44" }}>
+        <div><span className="text-muted-foreground">&gt; TRADER: </span>{trader.name}</div>
+        <div><span className="text-muted-foreground">&gt; STRATEGY: </span>{trader.strategyVersion} — {trader.strategyFocus}</div>
+        <div><span className="text-muted-foreground">&gt; STATUS: </span>{trader.status}</div>
+        <div><span className="text-muted-foreground">&gt; TFs: </span>{trader.timeframesReviewed.join(", ")}</div>
+        <div>
+          <span className="text-muted-foreground">&gt; BIAS: </span>
+          <span style={{ color: trader.bias === "Bullish" ? "#00ff88" : trader.bias === "Bearish" ? "#ff4444" : "#ffcc00" }}>
+            {trader.bias.toUpperCase()}
+          </span>
+          <span className="text-muted-foreground"> ({trader.confidence}% confidence)</span>
+        </div>
+        <div><span className="text-muted-foreground">&gt; ACTION: </span>{trader.currentAction}</div>
+        <div><span className="text-muted-foreground">&gt; BALANCE: </span>{fmtBal(trader.balance)}</div>
+      </div>
+
+      {/* ── Current Thesis ───────────────────────────────── */}
+      <PCSection title="// CURRENT THESIS" accent={accent}>
+        <div className="opacity-90">{trader.thesis}</div>
+      </PCSection>
+
+      {/* ── Market Narrative ─────────────────────────────── */}
+      <PCSection title="// MARKET NARRATIVE" accent={accent}>
+        <div className="opacity-85 leading-[1.6]">{trader.marketNarrative}</div>
+      </PCSection>
+
+      {/* ── Bull / Bear Case ─────────────────────────────── */}
+      <PCSection title="// BULL CASE / BEAR CASE" accent={accent}>
+        <div>
+          <span style={{ color: "#00ff88" }} className="font-bold">BULL: </span>
+          <span className="opacity-85">{trader.bullCase}</span>
+        </div>
+        <div>
+          <span style={{ color: "#ff4444" }} className="font-bold">BEAR: </span>
+          <span className="opacity-85">{trader.bearCase}</span>
+        </div>
+      </PCSection>
+
+      {/* ── Entry Conditions ─────────────────────────────── */}
+      <PCSection title="// ENTRY CONDITIONS" accent={accent}>
+        <div><span className="text-muted-foreground">WAITING FOR:  </span>{trader.waitingFor}</div>
+        <div className="mt-1"><span className="text-muted-foreground">TRIGGER:      </span>{trader.tradeTrigger}</div>
+        {!pos && (
+          <div className="mt-1"><span className="text-muted-foreground">NO-TRADE:     </span>{trader.noTradeReason}</div>
+        )}
+      </PCSection>
+
+      {/* ── Risk Plan ────────────────────────────────────── */}
+      <PCSection title="// RISK PLAN" accent={accent}>
+        <div><span className="text-muted-foreground">ENTRY AREA:   </span>{trader.riskPlan.entryArea}</div>
+        <div><span className="text-muted-foreground">INVALIDATION: </span>{trader.riskPlan.invalidation}</div>
+        <div><span className="text-muted-foreground">TARGET:       </span>{trader.riskPlan.target}</div>
+        <div><span className="text-muted-foreground">R:R:          </span>{trader.riskPlan.rr}</div>
+      </PCSection>
+
+      {/* ── What Would Change Mind ───────────────────────── */}
+      <PCSection title="// WHAT WOULD CHANGE MY MIND" accent={accent}>
+        <div className="opacity-90">{trader.whatWouldChangeMind}</div>
+      </PCSection>
+
+      {/* ── Open Position ────────────────────────────────── */}
+      {pos && (
+        <PCSection title="// OPEN POSITION" accent={accent}>
+          <div>
+            <span style={{ color: pos.direction === "BUY" ? "#00ff88" : "#ff4444" }} className="font-bold">{pos.direction}</span>
+            <span className="text-muted-foreground"> @ </span>{pos.entryPrice.toFixed(1)}
+          </div>
+          <div><span className="text-muted-foreground">SL: </span>{pos.stopLoss.toFixed(1)}<span className="text-muted-foreground"> | TP: </span>{pos.takeProfit.toFixed(1)}</div>
+          <div><span className="text-muted-foreground">SIZE: </span>{pos.size.toFixed(3)} lots</div>
+          <div style={{ color: pos.unrealizedPL >= 0 ? "#00ff88" : "#ff4444" }}>
+            UNREAL P/L: {fmtPL(pos.unrealizedPL)}
+          </div>
+        </PCSection>
+      )}
+
+      {/* ── Recent Trade ─────────────────────────────────── */}
+      {trader.closedTrades.length > 0 && (
+        <PCSection title="// MOST RECENT TRADE" accent={accent} defaultOpen={false}>
+          {(() => {
+            const t = trader.closedTrades[0];
+            return (
+              <>
+                <div>
+                  <span style={{ color: t.direction === "BUY" ? "#00ff88" : "#ff4444" }}>{t.direction}</span>
+                  <span className="text-muted-foreground"> </span>
+                  {t.entryPrice.toFixed(0)} → {t.exitPrice.toFixed(0)}
+                </div>
+                <div style={{ color: t.result >= 0 ? "#00ff88" : "#ff4444" }}>
+                  RESULT: {t.rMultiple >= 0 ? "+" : ""}{t.rMultiple.toFixed(1)}R ({fmtPL(t.result)})
+                </div>
+                <div className="text-muted-foreground">REASON: {t.reason}</div>
+              </>
+            );
+          })()}
+        </PCSection>
+      )}
+
+      {/* ── Reasoning Memory ─────────────────────────────── */}
+      <PCSection title={`// REASONING MEMORY (${trader.reasoningMemory.length})`} accent={accent} defaultOpen={false}>
+        {trader.reasoningMemory.length === 0 ? (
+          <div className="text-muted-foreground">No entries yet.</div>
+        ) : (
+          trader.reasoningMemory.map((entry, i) => (
+            <div key={i} className="flex gap-2 items-baseline">
+              <span className="text-muted-foreground shrink-0">[{entry.time}]</span>
+              <span className="opacity-85">{entry.note}</span>
+            </div>
+          ))
+        )}
+      </PCSection>
+
+      {/* ── Cursor ───────────────────────────────────────── */}
+      <div className="mt-3 flex items-center gap-1">
+        <span>&gt;</span>
+        <span className="inline-block" style={{ width: 6, height: 12, backgroundColor: accent, animation: "cursorBlink 1s step-end infinite" }} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────
 
 export default function TradingFloor() {
@@ -535,64 +687,12 @@ export default function TradingFloor() {
             <div className="p-4 overflow-y-auto text-[8px] text-foreground flex-1 leading-relaxed">
 
               {/* ── PC View ──────────────────────────────────────────────── */}
-              {activeModal.type === "pc" && activeTrader && (() => {
-                const cfg = TRADER_CONFIG[activeTrader.id];
-                const pos = activeTrader.openPosition;
-                return (
-                  <div className="flex flex-col gap-[6px] font-mono" style={{ color: cfg.accent }}>
-                    <div className="text-[7px] text-muted-foreground mb-1">─────────────────────────────────</div>
-                    <div>&gt; TRADER: {activeTrader.name}</div>
-                    <div>&gt; STRATEGY: {activeTrader.strategyVersion} — {activeTrader.strategyFocus}</div>
-                    <div>&gt; STATUS: {activeTrader.status}</div>
-                    <div>&gt; TIMEFRAMES: {activeTrader.timeframesReviewed.join(", ")}</div>
-                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
-                    <div>&gt; BIAS: {activeTrader.bias.toUpperCase()} ({activeTrader.confidence}% confidence)</div>
-                    <div>&gt; ACTION: {activeTrader.currentAction}</div>
-                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
-                    <div className="text-[7px] text-muted-foreground">INTERNAL REASONING:</div>
-                    <div className="text-[7px] leading-relaxed pl-2 opacity-90">{activeTrader.internalReasoning}</div>
-                    <div className="text-[7px] text-muted-foreground mt-1">ALTERNATIVE SCENARIO:</div>
-                    <div className="text-[7px] leading-relaxed pl-2 opacity-80">{activeTrader.alternativeScenario}</div>
-                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
-                    <div>&gt; LAST DECISION: {activeTrader.recentDecision}</div>
-                    {pos ? (
-                      <>
-                        <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
-                        <div className="text-[7px] text-muted-foreground">OPEN POSITION:</div>
-                        <div className="pl-2 flex flex-col gap-[3px] text-[7px]">
-                          <div>&gt; {pos.direction} @ {pos.entryPrice.toFixed(1)}</div>
-                          <div>&gt; SL: {pos.stopLoss.toFixed(1)} | TP: {pos.takeProfit.toFixed(1)}</div>
-                          <div>&gt; SIZE: {pos.size.toFixed(3)} lots</div>
-                          <div style={{ color: pos.unrealizedPL >= 0 ? "#00ff88" : "#ff4444" }}>
-                            &gt; UNREAL P/L: {fmtPL(pos.unrealizedPL)}
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div>&gt; POSITION: NONE</div>
-                    )}
-                    {activeTrader.closedTrades.length > 0 && (
-                      <>
-                        <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
-                        <div className="text-[7px] text-muted-foreground">RECENT TRADE:</div>
-                        <div className="pl-2 text-[7px] flex flex-col gap-[2px]">
-                          <div>&gt; {activeTrader.closedTrades[0].direction} {activeTrader.closedTrades[0].entryPrice.toFixed(0)} → {activeTrader.closedTrades[0].exitPrice.toFixed(0)}</div>
-                          <div style={{ color: activeTrader.closedTrades[0].result >= 0 ? "#00ff88" : "#ff4444" }}>
-                            &gt; RESULT: {activeTrader.closedTrades[0].rMultiple >= 0 ? "+" : ""}{activeTrader.closedTrades[0].rMultiple.toFixed(1)}R ({fmtPL(activeTrader.closedTrades[0].result)})
-                          </div>
-                          <div className="text-muted-foreground">&gt; REASON: {activeTrader.closedTrades[0].reason}</div>
-                        </div>
-                      </>
-                    )}
-                    <div className="text-[7px] text-muted-foreground my-1">─────────────────────────────────</div>
-                    <div>&gt; BALANCE: {fmtBal(activeTrader.balance)}</div>
-                    <div className="mt-3 flex items-center gap-1">
-                      <span>&gt;</span>
-                      <span className="inline-block" style={{ width: 6, height: 12, backgroundColor: cfg.accent, animation: "cursorBlink 1s step-end infinite" }} />
-                    </div>
-                  </div>
-                );
-              })()}
+              {activeModal.type === "pc" && activeTrader && (
+                <PCView
+                  trader={activeTrader}
+                  accent={TRADER_CONFIG[activeTrader.id].accent}
+                />
+              )}
 
               {/* ── Journal ──────────────────────────────────────────────── */}
               {activeModal.type === "journal" && activeTrader && (() => {
