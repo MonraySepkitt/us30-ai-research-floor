@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "US30 AI Research Floor"
+version = "1.0.0"
+id = "artifacts/us30-research-floor"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25513
+
+[services.development]
+run = "pnpm --filter @workspace/us30-research-floor run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/us30-research-floor", "run", "build" ]
+publicDir = "artifacts/us30-research-floor/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25513"
+BASE_PATH = "/"
