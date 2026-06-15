@@ -5,6 +5,7 @@ import {
   type Bias,
   type TraderStatus,
   type RiskPlan,
+  getSASTHHMM,
   checkAndUpdatePosition,
   buildPosition,
   appendReasoning,
@@ -74,6 +75,53 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+// ─── Research project ticker ───────────────────────────────────────────────
+
+function generateResearchFinding(id: TraderState['id'], progress: number, tradesReviewed: number): string {
+  if (id === 'ict') {
+    if (progress < 30) return `Logging session time for each sweep entry. ${tradesReviewed} trades recorded. Too early to conclude.`;
+    if (progress < 55) return `NY session sweeps (15:30–18:00 SAST) showing stronger FVG formation. ${tradesReviewed} trades reviewed. Pattern emerging.`;
+    if (progress < 80) return `${tradesReviewed} trades reviewed. ~70% of winning setups occurred within 90min of NY Open. Off-session entries underperforming.`;
+    if (progress < 100) return `Strong pattern: NY Open window outperforming all-session entries. Recommending session filter. ${tradesReviewed} trades in sample.`;
+    return `Research COMPLETE (${tradesReviewed} trades). NY Open window (15:30–18:00 SAST) consistently outperforms. Session filter validated.`;
+  }
+  if (id === 'trend') {
+    if (progress < 30) return `Tracking SMA gap size at each entry. ${tradesReviewed} trades logged. Data collection phase.`;
+    if (progress < 55) return `4H-aligned pullbacks showing ~68% win rate vs ~49% non-aligned in ${tradesReviewed}-trade sample. Gap threshold testing at 55pts.`;
+    if (progress < 80) return `SMA gap > 60pts filtering out most choppy-market entries. ${tradesReviewed} trades reviewed. Gap threshold refinement ongoing.`;
+    if (progress < 100) return `Research near complete (${tradesReviewed} trades). 4H alignment adds ~20% win rate improvement. Gap > 55pts validated as minimum.`;
+    return `Research COMPLETE (${tradesReviewed} trades). 4H SMA alignment gate validated. Implementing gap > 55pts and 4H check as permanent rules.`;
+  }
+  // breakout
+  if (progress < 30) return `Logging compression candle count per setup. ${tradesReviewed} trades. 2-candle setups showing early signs of higher false-break rate.`;
+  if (progress < 55) return `4+ candle compression setups succeeding at 3× rate of shorter ones in ${tradesReviewed}-trade sample. ATR filter also being tested.`;
+  if (progress < 80) return `${tradesReviewed} trades reviewed. ATR pre-entry filter (> 1.3× avg) cutting losers. 4-candle minimum rule validated in ${tradesReviewed} setups.`;
+  if (progress < 100) return `Near complete (${tradesReviewed} trades). Minimum 4-candle compression rule reducing false breakouts by ~40%. ATR filter adds incremental edge.`;
+  return `Research COMPLETE (${tradesReviewed} trades). 4-candle compression minimum validated. ATR < 1.3× avg confirmed. Both rules added as hard entry gates.`;
+}
+
+function tickResearch(state: TraderState): TraderState {
+  if (Math.random() > 0.28) return state;
+  const active = state.researchProjects.filter((p) => p.status === 'ACTIVE');
+  if (!active.length) return state;
+
+  const project = active[Math.floor(Math.random() * active.length)];
+  const gain = Math.floor(Math.random() * 9) + 4;
+  const newProgress = Math.min(100, project.progress + gain);
+  const newStatus = newProgress >= 100 ? 'COMPLETE' : 'ACTIVE';
+  const newTradesReviewed = Math.max(project.tradesReviewed, state.closedTrades.length);
+  const findings = generateResearchFinding(state.id, newProgress, newTradesReviewed);
+
+  return {
+    ...state,
+    researchProjects: state.researchProjects.map((p) =>
+      p.id === project.id
+        ? { ...p, progress: newProgress, status: newStatus, tradesReviewed: newTradesReviewed, currentFindings: findings, lastUpdated: getSASTHHMM() }
+        : p
+    ),
+  };
+}
+
 // ─── ICT Trader ───────────────────────────────────────────────────────────
 
 export function runICTCycle(
@@ -89,19 +137,18 @@ export function runICTCycle(
   let s = posCheck.state;
   const event = posCheck.event;
   if (event) return { state: s, event };
-
   if (s.openPosition) return { state: s, event: null };
 
-  const sweepUp   = hasLiquiditySweepUp(c1);
-  const sweepDown = hasLiquiditySweepDown(c1);
-  const bullFVG   = hasBullishFVG(c1.slice(-5));
-  const bearFVG   = hasBearishFVG(c1.slice(-5));
-  const sH        = swingHigh(c4, 20);
-  const sL        = swingLow(c4, 20);
-  const price     = latest1H.close;
-  const mid4H     = (sH + sL) / 2;
+  const sweepUp    = hasLiquiditySweepUp(c1);
+  const sweepDown  = hasLiquiditySweepDown(c1);
+  const bullFVG    = hasBullishFVG(c1.slice(-5));
+  const bearFVG    = hasBearishFVG(c1.slice(-5));
+  const sH         = swingHigh(c4, 20);
+  const sL         = swingLow(c4, 20);
+  const price      = latest1H.close;
+  const mid4H      = (sH + sL) / 2;
   const above4HMid = price > mid4H;
-  const atr1H     = atr(c1);
+  const atr1H      = atr(c1);
 
   const bullConditions = (sweepDown ? 1 : 0) + (bullFVG ? 1 : 0) + (above4HMid ? 1 : 0);
   const bearConditions = (sweepUp ? 1 : 0) + (bearFVG ? 1 : 0) + (!above4HMid ? 1 : 0);
@@ -111,18 +158,12 @@ export function runICTCycle(
   const maxCond = Math.max(bullConditions, bearConditions);
   const statusOptions: TraderStatus[] = ['ANALYZING', 'THINKING', 'WAITING', 'RESEARCHING'];
 
-  // ── Build deep thinking fields ───────────────────────────────────────────
-
   const thesis = above4HMid
-    ? sweepDown
-      ? 'Bullish continuation probable. Sweep below confirmed. Waiting for FVG entry.'
-      : bullFVG
-      ? 'Bullish FVG present. Monitoring for price reaction and MSS.'
+    ? sweepDown ? 'Bullish continuation probable. Sweep below confirmed. Waiting for FVG entry.'
+      : bullFVG ? 'Bullish FVG present. Monitoring for price reaction and MSS.'
       : 'Bullish bias intact above 4H midpoint. No entry trigger yet.'
-    : sweepUp
-      ? 'Bearish continuation probable. Sweep above confirmed. Monitoring for entry.'
-      : bearFVG
-      ? 'Bearish FVG detected. Waiting for MSS to confirm continuation.'
+    : sweepUp ? 'Bearish continuation probable. Sweep above confirmed. Monitoring for entry.'
+      : bearFVG ? 'Bearish FVG detected. Waiting for MSS to confirm continuation.'
       : 'Bearish lean below 4H midpoint. Insufficient confluence for entry.';
 
   const marketNarrative = above4HMid
@@ -133,11 +174,9 @@ export function runICTCycle(
   const bearCase  = `Failure to reclaim after any sweep. Break below ${(mid4H - atr1H).toFixed(0)} on 4H close. Bearish FVG forms and holds.`;
 
   const waitingFor = above4HMid
-    ? sweepDown
-      ? 'Bullish MSS on 15M + FVG formation after the sweep.'
+    ? sweepDown ? 'Bullish MSS on 15M + FVG formation after the sweep.'
       : `Liquidity sweep below ${swingLow(c1, 15).toFixed(0)} + displacement candle.`
-    : sweepUp
-      ? 'Bearish MSS confirmation + FVG fill on 1H.'
+    : sweepUp ? 'Bearish MSS confirmation + FVG fill on 1H.'
       : `Liquidity sweep above ${swingHigh(c1, 15).toFixed(0)} + rejection candle.`;
 
   const tradeTrigger = above4HMid
@@ -146,26 +185,23 @@ export function runICTCycle(
 
   const noTradeReason = bullConditions < 2 && bearConditions < 2
     ? 'Insufficient confluence — need at least 2 of 3 conditions aligned.'
-    : sweepDown || sweepUp
-    ? 'Sweep confirmed but MSS not yet formed — waiting for structure shift.'
-    : bullFVG || bearFVG
-    ? 'FVG present but no liquidity sweep — incomplete setup.'
+    : sweepDown || sweepUp ? 'Sweep confirmed but MSS not yet formed — waiting for structure shift.'
+    : bullFVG || bearFVG ? 'FVG present but no liquidity sweep — incomplete setup.'
     : 'Session timing not optimal. Liquidity not yet engineered.';
 
   const entryEst   = above4HMid ? (price - atr1H * 0.5).toFixed(0) : (price + atr1H * 0.5).toFixed(0);
   const invalidLvl = above4HMid ? (mid4H - atr1H * 0.5).toFixed(0) : (mid4H + atr1H * 0.5).toFixed(0);
   const riskPlan: RiskPlan = {
-    entryArea: `Around ${entryEst} — on FVG fill after MSS`,
+    entryArea:    `Around ${entryEst} — on FVG fill after MSS`,
     invalidation: `${above4HMid ? '4H close below' : '4H close above'} ${invalidLvl}`,
-    target: `Opposing swing ${above4HMid ? 'high' : 'low'} at ~${(above4HMid ? sH : sL).toFixed(0)}`,
-    rr: '1:2 minimum — targeting 2R clean',
+    target:       `Opposing swing ${above4HMid ? 'high' : 'low'} at ~${(above4HMid ? sH : sL).toFixed(0)}`,
+    rr:           '1:2 minimum — targeting 2R clean',
   };
 
   const whatWouldChangeMind = above4HMid
     ? `A clean 4H close below ${(mid4H - atr1H * 0.3).toFixed(0)} would invalidate the bullish structure entirely.`
     : `A reclaim of ${(mid4H + atr1H * 0.3).toFixed(0)} on 4H close would force a re-evaluation to neutral.`;
 
-  // ── Reasoning memory note ────────────────────────────────────────────────
   const memNote = biasChanged
     ? `Bias shifted to ${bias}. ${bullConditions} bull / ${bearConditions} bear conditions active.`
     : maxCond >= 2
@@ -177,43 +213,41 @@ export function runICTCycle(
         `Patience. Setup not ready. Conditions: ${bullConditions}/3 bull, ${bearConditions}/3 bear.`,
       ]);
 
-  // ── Enter if 2+ conditions ───────────────────────────────────────────────
   if (maxCond >= 2 && confidence >= 55 && s.balance > 50) {
     const direction = bullConditions >= bearConditions ? 'BUY' : 'SELL';
     const slDist    = atr1H * 1.2;
-    const pos       = buildPosition(s, direction, price, slDist, latest1H.time);
     const reasonParts: string[] = [];
     if (direction === 'BUY') {
       if (sweepDown) reasonParts.push('liquidity sweep below');
       if (bullFVG)   reasonParts.push('bullish FVG present');
       if (above4HMid) reasonParts.push('above 4H midpoint');
     } else {
-      if (sweepUp)   reasonParts.push('liquidity sweep above');
-      if (bearFVG)   reasonParts.push('bearish FVG present');
+      if (sweepUp)    reasonParts.push('liquidity sweep above');
+      if (bearFVG)    reasonParts.push('bearish FVG present');
       if (!above4HMid) reasonParts.push('below 4H midpoint');
     }
     const reason = reasonParts.join(', ');
-    const msg = `entered ${direction} at ${price.toFixed(0)} — ${reason}`;
-    const entryNote = `Entered ${direction} at ${price.toFixed(0)}. Reason: ${reason}. SL: ${pos.stopLoss.toFixed(0)}, TP: ${pos.takeProfit.toFixed(0)}.`;
+    const pos    = buildPosition(s, direction, price, slDist, latest1H.time, reason);
+    const msg    = `entered ${direction} at ${price.toFixed(0)} — ${reason}`;
+    const note   = `Entered ${direction} at ${price.toFixed(0)}. Reason: ${reason}. SL: ${pos.stopLoss.toFixed(0)}, TP: ${pos.takeProfit.toFixed(0)}.`;
     return {
-      state: {
+      state: tickResearch({
         ...s, bias, confidence: Math.min(95, confidence),
         status: 'IN TRADE', openPosition: pos,
         currentAction: `${direction} position open — monitoring for TP`,
         internalReasoning: `Entered on ${reason}. SL: ${pos.stopLoss.toFixed(0)}, TP: ${pos.takeProfit.toFixed(0)}.`,
-        recentDecision: msg,
-        timeframesReviewed: ['4H', '1H'],
+        recentDecision: msg, timeframesReviewed: ['4H', '1H'],
         thesis, marketNarrative, bullCase, bearCase,
         waitingFor: 'Monitoring open position — TP or SL.',
         tradeTrigger: `Already in ${direction} trade.`,
         noTradeReason: 'In active position.',
         riskPlan: { ...riskPlan, entryArea: `Entered at ${pos.entryPrice.toFixed(0)}`, invalidation: `SL at ${pos.stopLoss.toFixed(0)}`, target: `TP at ${pos.takeProfit.toFixed(0)}` },
         whatWouldChangeMind,
-        reasoningMemory: appendReasoning(s.reasoningMemory, entryNote),
+        reasoningMemory: appendReasoning(s.reasoningMemory, note),
         alternativeScenario: direction === 'BUY'
           ? `Close below ${pos.stopLoss.toFixed(0)} invalidates thesis`
           : `Close above ${pos.stopLoss.toFixed(0)} invalidates thesis`,
-      },
+      }),
       event: { traderId: 'ict', msg },
     };
   }
@@ -221,25 +255,18 @@ export function runICTCycle(
   const skipReason = noTradeReason;
   const msg = `skipped setup — ${skipReason.toLowerCase()}`;
   return {
-    state: {
+    state: tickResearch({
       ...s, bias, confidence: Math.min(85, Math.max(25, confidence)),
       status: pick(statusOptions),
-      currentAction: pick([
-        'Scanning for FVG on 1H', 'Reviewing 4H order block levels',
-        'Watching for liquidity sweep', 'Mapping premium/discount zones',
-        'Checking HTF bias alignment',
-      ]),
+      currentAction: pick(['Scanning for FVG on 1H', 'Reviewing 4H order block levels', 'Watching for liquidity sweep', 'Mapping premium/discount zones', 'Checking HTF bias alignment']),
       internalReasoning: `${bullConditions} bullish / ${bearConditions} bearish conditions. ${skipReason}`,
-      recentDecision: msg,
-      timeframesReviewed: ['4H', '1H'],
+      recentDecision: msg, timeframesReviewed: ['4H', '1H'],
       strategyFocus: 'Order blocks & FVGs',
-      alternativeScenario: above4HMid
-        ? `Bullish bias holds above 4H midpoint ${mid4H.toFixed(0)}`
-        : `Bearish bias holds below 4H midpoint ${mid4H.toFixed(0)}`,
+      alternativeScenario: above4HMid ? `Bullish bias holds above 4H midpoint ${mid4H.toFixed(0)}` : `Bearish bias holds below 4H midpoint ${mid4H.toFixed(0)}`,
       thesis, marketNarrative, bullCase, bearCase,
       waitingFor, tradeTrigger, noTradeReason: skipReason, riskPlan, whatWouldChangeMind,
       reasoningMemory: appendReasoning(s.reasoningMemory, memNote),
-    },
+    }),
     event: Math.random() < 0.5 ? { traderId: 'ict', msg } : null,
   };
 }
@@ -258,37 +285,30 @@ export function runTrendCycle(
   let s = posCheck.state;
   const event = posCheck.event;
   if (event) return { state: s, event };
-
   if (s.openPosition) return { state: s, event: null };
 
-  const price    = latest1H.close;
-  const sma20    = sma(c1, 20);
-  const sma50    = sma(c1, 50);
-  const sma4H    = sma(candles4H, 10);
-  const atr1H    = atr(c1);
-  const bullTrend = price > sma20 && sma20 > sma50;
-  const bearTrend = price < sma20 && sma20 < sma50;
+  const price      = latest1H.close;
+  const sma20      = sma(c1, 20);
+  const sma50      = sma(c1, 50);
+  const sma4H      = sma(candles4H, 10);
+  const atr1H      = atr(c1);
+  const bullTrend  = price > sma20 && sma20 > sma50;
+  const bearTrend  = price < sma20 && sma20 < sma50;
   const atSMA20bull = price <= sma20 * 1.002 && price >= sma20 * 0.998 && bullTrend;
   const atSMA20bear = price >= sma20 * 0.998 && price <= sma20 * 1.002 && bearTrend;
-  const last5   = c1.slice(-5);
-  const bullMom = last5.filter((c) => c.close > c.open).length >= 3;
-  const bearMom = last5.filter((c) => c.close < c.open).length >= 3;
+  const last5      = c1.slice(-5);
+  const bullMom    = last5.filter((c) => c.close > c.open).length >= 3;
+  const bearMom    = last5.filter((c) => c.close < c.open).length >= 3;
   const bias: Bias = bullTrend ? 'Bullish' : bearTrend ? 'Bearish' : 'Neutral';
   const biasChanged = bias !== s.bias;
-  const confidence = jitter(
-    bullTrend ? (bullMom ? 75 : 58) : bearTrend ? (bearMom ? 72 : 56) : 40, 15
-  );
-  const smaDiff = Math.abs(sma20 - sma50);
-
-  // ── Deep thinking ────────────────────────────────────────────────────────
+  const confidence = jitter(bullTrend ? (bullMom ? 75 : 58) : bearTrend ? (bearMom ? 72 : 56) : 40, 15);
+  const smaDiff    = Math.abs(sma20 - sma50);
 
   const thesis = bullTrend
-    ? atSMA20bull && bullMom
-      ? 'Bullish trend pullback entry forming. Price at SMA20 with momentum confirmation.'
+    ? atSMA20bull && bullMom ? 'Bullish trend pullback entry forming. Price at SMA20 with momentum confirmation.'
       : `Bullish trend intact. SMA20 (${sma20.toFixed(0)}) above SMA50 (${sma50.toFixed(0)}). Waiting for pullback.`
     : bearTrend
-    ? atSMA20bear && bearMom
-      ? 'Bearish trend pullback entry forming. Price at SMA20 with bearish momentum.'
+    ? atSMA20bear && bearMom ? 'Bearish trend pullback entry forming. Price at SMA20 with bearish momentum.'
       : `Bearish trend confirmed. SMA20 (${sma20.toFixed(0)}) below SMA50 (${sma50.toFixed(0)}). Waiting for rally to fade.`
     : `No trend. SMAs converging (${smaDiff.toFixed(0)}pt gap). Neutral until direction resolves.`;
 
@@ -302,19 +322,15 @@ export function runTrendCycle(
   const bearCase = `SMA20 crosses below SMA50. Bearish momentum accelerates with 3+ red candles. 4H SMA at ${sma4H.toFixed(0)} turns down.`;
 
   const waitingFor = bullTrend
-    ? atSMA20bull
-      ? 'Momentum confirmation: 3+ bullish closes while touching SMA20.'
+    ? atSMA20bull ? 'Momentum confirmation: 3+ bullish closes while touching SMA20.'
       : `Price to pull back to SMA20 at ${sma20.toFixed(0)} from current ${price.toFixed(0)}.`
     : bearTrend
-    ? atSMA20bear
-      ? 'Bearish momentum: 3+ bearish closes while testing SMA20.'
+    ? atSMA20bear ? 'Bearish momentum: 3+ bearish closes while testing SMA20.'
       : `Price to rally back to SMA20 at ${sma20.toFixed(0)} from current ${price.toFixed(0)}.`
     : 'SMA separation to widen. Need SMA20/SMA50 gap > 50pts for trend confidence.';
 
-  const tradeTrigger = bullTrend
-    ? 'Buy at SMA20 with 3+ bullish candles confirming. SL below SMA50.'
-    : bearTrend
-    ? 'Sell at SMA20 test with 3+ bearish candles. SL above SMA50.'
+  const tradeTrigger = bullTrend ? 'Buy at SMA20 with 3+ bullish candles confirming. SL below SMA50.'
+    : bearTrend ? 'Sell at SMA20 test with 3+ bearish candles. SL above SMA50.'
     : 'No trigger — wait for SMA cross and momentum to align.';
 
   const noTradeReason = !bullTrend && !bearTrend
@@ -324,10 +340,10 @@ export function runTrendCycle(
     : `Price is ${bullTrend ? (price - sma20).toFixed(0) + 'pts above' : (sma20 - price).toFixed(0) + 'pts below'} SMA20 — waiting for pullback.`;
 
   const riskPlan: RiskPlan = {
-    entryArea: `SMA20 at ${sma20.toFixed(0)} ± ${(atr1H * 0.2).toFixed(0)}pts`,
+    entryArea:    `SMA20 at ${sma20.toFixed(0)} ± ${(atr1H * 0.2).toFixed(0)}pts`,
     invalidation: bullTrend ? `SMA20 crosses below SMA50 (currently ${sma50.toFixed(0)})` : bearTrend ? `SMA20 crosses above SMA50` : 'SMA cross in either direction',
-    target: bullTrend ? `Previous swing high — approx ${(price + atr1H * 2).toFixed(0)}` : bearTrend ? `Previous swing low — approx ${(price - atr1H * 2).toFixed(0)}` : 'N/A',
-    rr: '1:1.5 minimum, 1:2 in strong trends',
+    target:       bullTrend ? `Previous swing high — approx ${(price + atr1H * 2).toFixed(0)}` : bearTrend ? `Previous swing low — approx ${(price - atr1H * 2).toFixed(0)}` : 'N/A',
+    rr:           '1:1.5 minimum, 1:2 in strong trends',
   };
 
   const whatWouldChangeMind = bullTrend
@@ -351,54 +367,45 @@ export function runTrendCycle(
   if (canEnter) {
     const direction = atSMA20bull ? 'BUY' : 'SELL';
     const slDist    = atr1H * 1.4;
-    const pos       = buildPosition(s, direction, price, slDist, latest1H.time);
     const momDesc   = direction === 'BUY' ? 'bullish momentum confirmed' : 'bearish momentum confirmed';
+    const entryReason = `Pullback to SMA20 at ${sma20.toFixed(0)}, ${momDesc}, SMA gap ${smaDiff.toFixed(0)}pts`;
+    const pos       = buildPosition(s, direction, price, slDist, latest1H.time, entryReason);
     const msg       = `entered ${direction} at ${price.toFixed(0)} — pullback to SMA20, ${momDesc}`;
-    const entryNote = `Entered ${direction} at ${price.toFixed(0)}. SMA20 pullback + ${momDesc}. SL: ${pos.stopLoss.toFixed(0)}.`;
+    const note      = `Entered ${direction} at ${price.toFixed(0)}. SMA20 pullback + ${momDesc}. SL: ${pos.stopLoss.toFixed(0)}.`;
     return {
-      state: {
+      state: tickResearch({
         ...s, bias, confidence: Math.min(90, confidence),
         status: 'IN TRADE', openPosition: pos,
         currentAction: `${direction} trade open — riding trend`,
         internalReasoning: `${bias} trend. Pullback to SMA20 at ${sma20.toFixed(0)}. ${momDesc}.`,
-        recentDecision: msg,
-        timeframesReviewed: ['4H', '1H'],
+        recentDecision: msg, timeframesReviewed: ['4H', '1H'],
         thesis, marketNarrative, bullCase, bearCase,
         waitingFor: 'Monitoring open position.',
         tradeTrigger: `Already in ${direction} trade.`,
         noTradeReason: 'In active position.',
         riskPlan: { ...riskPlan, entryArea: `Entered at ${pos.entryPrice.toFixed(0)}`, invalidation: `SL at ${pos.stopLoss.toFixed(0)}`, target: `TP at ${pos.takeProfit.toFixed(0)}` },
         whatWouldChangeMind,
-        reasoningMemory: appendReasoning(s.reasoningMemory, entryNote),
+        reasoningMemory: appendReasoning(s.reasoningMemory, note),
         alternativeScenario: direction === 'BUY' ? 'Trend fails if SMA20 crosses below SMA50' : 'Trend fails if SMA20 crosses above SMA50',
-      },
+      }),
       event: { traderId: 'trend', msg },
     };
   }
 
   const msg = `analyzing — ${noTradeReason.toLowerCase()}`;
   return {
-    state: {
+    state: tickResearch({
       ...s, bias, confidence: Math.min(85, Math.max(20, confidence)),
       status: pick(['ANALYZING', 'RESEARCHING', 'THINKING', 'WAITING']),
-      currentAction: pick([
-        `Monitoring SMA20 at ${sma20.toFixed(0)}`,
-        'Checking momentum candles on 1H',
-        'Reviewing HTF trend structure',
-        `Watching SMA50 at ${sma50.toFixed(0)} for support`,
-        'Checking for trend continuation pattern',
-      ]),
+      currentAction: pick([`Monitoring SMA20 at ${sma20.toFixed(0)}`, 'Checking momentum candles on 1H', 'Reviewing HTF trend structure', `Watching SMA50 at ${sma50.toFixed(0)} for support`, 'Checking for trend continuation pattern']),
       internalReasoning: `SMA20: ${sma20.toFixed(0)}, SMA50: ${sma50.toFixed(0)}, gap: ${smaDiff.toFixed(0)}pts. ${bias} ${bullTrend || bearTrend ? 'confirmed' : 'not confirmed'}.`,
-      recentDecision: msg,
-      timeframesReviewed: ['4H', '1H'],
+      recentDecision: msg, timeframesReviewed: ['4H', '1H'],
       strategyFocus: 'SMA trend & momentum',
-      alternativeScenario: bias === 'Neutral'
-        ? 'Wait for SMA cross to confirm direction'
-        : `Hold ${bias} bias while price remains on correct side of SMA50`,
+      alternativeScenario: bias === 'Neutral' ? 'Wait for SMA cross to confirm direction' : `Hold ${bias} bias while price remains on correct side of SMA50`,
       thesis, marketNarrative, bullCase, bearCase,
       waitingFor, tradeTrigger, noTradeReason, riskPlan, whatWouldChangeMind,
       reasoningMemory: appendReasoning(s.reasoningMemory, memNote),
-    },
+    }),
     event: Math.random() < 0.5 ? { traderId: 'trend', msg } : null,
   };
 }
@@ -416,29 +423,22 @@ export function runBreakoutCycle(
   let s = posCheck.state;
   const event = posCheck.event;
   if (event) return { state: s, event };
-
   if (s.openPosition) return { state: s, event: null };
 
-  const price    = latest1H.close;
-  const atr1H    = atr(c1);
+  const price       = latest1H.close;
+  const atr1H       = atr(c1);
   const { rangeH, rangeL, rangeSize } = rangeHighLow(c1, 12);
   const isCompressed = rangeSize < atr1H * 1.6;
-  const breakoutUp   = price > rangeH + atr1H * 0.15;
+  const breakoutUp  = price > rangeH + atr1H * 0.15;
   const breakoutDown = price < rangeL - atr1H * 0.15;
-  const volDesc  = atr1H > 80 ? 'high' : atr1H > 50 ? 'medium' : 'low';
-  const bias: Bias = breakoutUp ? 'Bullish' : breakoutDown ? 'Bearish' : 'Neutral';
+  const volDesc     = atr1H > 80 ? 'high' : atr1H > 50 ? 'medium' : 'low';
+  const bias: Bias  = breakoutUp ? 'Bullish' : breakoutDown ? 'Bearish' : 'Neutral';
   const biasChanged = bias !== s.bias;
-  const confidence = jitter(
-    isCompressed ? (breakoutUp || breakoutDown ? 72 : 55) : (breakoutUp || breakoutDown ? 60 : 35), 18
-  );
-
-  // ── Deep thinking ────────────────────────────────────────────────────────
+  const confidence  = jitter(isCompressed ? (breakoutUp || breakoutDown ? 72 : 55) : (breakoutUp || breakoutDown ? 60 : 35), 18);
 
   const thesis = isCompressed
-    ? breakoutUp
-      ? `Bullish breakout confirmed above ${rangeH.toFixed(0)}. Riding expansion.`
-      : breakoutDown
-      ? `Bearish breakout confirmed below ${rangeL.toFixed(0)}. Riding expansion.`
+    ? breakoutUp ? `Bullish breakout confirmed above ${rangeH.toFixed(0)}. Riding expansion.`
+      : breakoutDown ? `Bearish breakout confirmed below ${rangeL.toFixed(0)}. Riding expansion.`
       : `Compression active. Range ${rangeSize.toFixed(0)}pts vs ATR ${atr1H.toFixed(0)}. Waiting for the break.`
     : `Range too wide (${rangeSize.toFixed(0)}pts). Need tighter compression before breakout is tradeable.`;
 
@@ -450,8 +450,7 @@ export function runBreakoutCycle(
   const bearCase = `Clean close below ${rangeL.toFixed(0)} with follow-through. No re-entry into range. ATR expands on break.`;
 
   const waitingFor = isCompressed
-    ? breakoutUp || breakoutDown
-      ? 'Confirmation that breakout holds — no wick back inside range.'
+    ? breakoutUp || breakoutDown ? 'Confirmation that breakout holds — no wick back inside range.'
       : `Close outside range: above ${rangeH.toFixed(0)} or below ${rangeL.toFixed(0)} by at least ${(atr1H * 0.15).toFixed(0)}pts.`
     : `Range to tighten below ${(atr1H * 1.6).toFixed(0)}pts. Currently ${rangeSize.toFixed(0)}pts.`;
 
@@ -464,10 +463,10 @@ export function runBreakoutCycle(
     : 'Confidence below threshold — monitoring for fake-out before committing.';
 
   const riskPlan: RiskPlan = {
-    entryArea: breakoutUp ? `Just above ${rangeH.toFixed(0)} on breakout close` : breakoutDown ? `Just below ${rangeL.toFixed(0)} on breakout close` : `Breakout of range: ${rangeL.toFixed(0)}–${rangeH.toFixed(0)}`,
+    entryArea:    breakoutUp ? `Just above ${rangeH.toFixed(0)} on breakout close` : breakoutDown ? `Just below ${rangeL.toFixed(0)} on breakout close` : `Breakout of range: ${rangeL.toFixed(0)}–${rangeH.toFixed(0)}`,
     invalidation: breakoutUp ? `Re-entry below ${rangeH.toFixed(0)} (false break)` : breakoutDown ? `Re-entry above ${rangeL.toFixed(0)} (false break)` : `Any false break back inside range`,
-    target: `Range projection: ${rangeSize.toFixed(0)}pts from breakout point`,
-    rr: '1:2 targeting full range projection',
+    target:       `Range projection: ${rangeSize.toFixed(0)}pts from breakout point`,
+    rr:           '1:2 targeting full range projection',
   };
 
   const whatWouldChangeMind = breakoutUp
@@ -489,50 +488,43 @@ export function runBreakoutCycle(
   const canEnter = (breakoutUp || breakoutDown) && isCompressed && confidence >= 50 && s.balance > 50;
 
   if (canEnter) {
-    const direction = breakoutUp ? 'BUY' : 'SELL';
-    const slDist    = atr1H * 1.1;
-    const pos       = buildPosition(s, direction, price, slDist, latest1H.time);
-    const brkDesc   = direction === 'BUY' ? `broke above ${rangeH.toFixed(0)}` : `broke below ${rangeL.toFixed(0)}`;
-    const msg       = `entered ${direction} at ${price.toFixed(0)} — breakout: ${brkDesc}`;
-    const entryNote = `Entered ${direction} at ${price.toFixed(0)}. ${brkDesc}. Range was ${rangeSize.toFixed(0)}pts. SL: ${pos.stopLoss.toFixed(0)}.`;
+    const direction  = breakoutUp ? 'BUY' : 'SELL';
+    const slDist     = atr1H * 1.1;
+    const brkDesc    = direction === 'BUY' ? `broke above ${rangeH.toFixed(0)}` : `broke below ${rangeL.toFixed(0)}`;
+    const entryReason = `Breakout: ${brkDesc}. Range was ${rangeSize.toFixed(0)}pts (ATR ${atr1H.toFixed(0)}). Compressed < 1.6× ATR.`;
+    const pos        = buildPosition(s, direction, price, slDist, latest1H.time, entryReason);
+    const msg        = `entered ${direction} at ${price.toFixed(0)} — breakout: ${brkDesc}`;
+    const note       = `Entered ${direction} at ${price.toFixed(0)}. ${brkDesc}. Range was ${rangeSize.toFixed(0)}pts. SL: ${pos.stopLoss.toFixed(0)}.`;
     return {
-      state: {
+      state: tickResearch({
         ...s, bias, confidence: Math.min(88, confidence),
         status: 'IN TRADE', openPosition: pos,
         currentAction: `${direction} breakout trade open — riding expansion`,
         internalReasoning: `Compression ${rangeSize.toFixed(0)}pts, ATR ${atr1H.toFixed(0)}. ${brkDesc}. Expansion expected.`,
-        recentDecision: msg,
-        timeframesReviewed: ['1H'],
+        recentDecision: msg, timeframesReviewed: ['1H'],
         thesis, marketNarrative, bullCase, bearCase,
         waitingFor: 'Monitoring breakout trade — watching for false break.',
         tradeTrigger: `Already in ${direction} breakout trade.`,
         noTradeReason: 'In active position.',
         riskPlan: { ...riskPlan, entryArea: `Entered at ${pos.entryPrice.toFixed(0)}`, invalidation: `SL at ${pos.stopLoss.toFixed(0)}`, target: `TP at ${pos.takeProfit.toFixed(0)}` },
         whatWouldChangeMind,
-        reasoningMemory: appendReasoning(s.reasoningMemory, entryNote),
+        reasoningMemory: appendReasoning(s.reasoningMemory, note),
         alternativeScenario: direction === 'BUY'
           ? `Breakout fails if price re-enters range below ${rangeH.toFixed(0)}`
           : `Breakout fails if price re-enters range above ${rangeL.toFixed(0)}`,
-      },
+      }),
       event: { traderId: 'breakout', msg },
     };
   }
 
   const msg = `monitoring — ${noTradeReason.toLowerCase()}`;
   return {
-    state: {
+    state: tickResearch({
       ...s, bias, confidence: Math.min(80, Math.max(20, confidence)),
       status: isCompressed ? pick(['ANALYZING', 'WAITING']) : pick(['THINKING', 'RESEARCHING']),
-      currentAction: pick([
-        `Watching range compression (${rangeSize.toFixed(0)}pts)`,
-        `Monitoring breakout level at ${rangeH.toFixed(0)}`,
-        `Tracking ATR contraction — ATR: ${atr1H.toFixed(0)}`,
-        'Waiting for breakout candle confirmation',
-        `Range: ${rangeL.toFixed(0)} – ${rangeH.toFixed(0)}`,
-      ]),
+      currentAction: pick([`Watching range compression (${rangeSize.toFixed(0)}pts)`, `Monitoring breakout level at ${rangeH.toFixed(0)}`, `Tracking ATR contraction — ATR: ${atr1H.toFixed(0)}`, 'Waiting for breakout candle confirmation', `Range: ${rangeL.toFixed(0)} – ${rangeH.toFixed(0)}`]),
       internalReasoning: `Range ${rangeSize.toFixed(0)}pts, ATR ${atr1H.toFixed(0)}. ${isCompressed ? 'Compressed.' : 'Too wide.'} ${breakoutUp || breakoutDown ? 'Possible break forming.' : 'No signal.'}`,
-      recentDecision: msg,
-      timeframesReviewed: ['1H'],
+      recentDecision: msg, timeframesReviewed: ['1H'],
       strategyFocus: 'Range breakout & volatility',
       alternativeScenario: isCompressed
         ? `Longer compression → stronger breakout. Watching for 2+ more ranging cycles.`
@@ -540,7 +532,7 @@ export function runBreakoutCycle(
       thesis, marketNarrative, bullCase, bearCase,
       waitingFor, tradeTrigger, noTradeReason, riskPlan, whatWouldChangeMind,
       reasoningMemory: appendReasoning(s.reasoningMemory, memNote),
-    },
+    }),
     event: Math.random() < 0.55 ? { traderId: 'breakout', msg } : null,
   };
 }
