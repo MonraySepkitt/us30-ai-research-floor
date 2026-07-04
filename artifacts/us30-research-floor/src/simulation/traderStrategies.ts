@@ -87,6 +87,20 @@ function personalityAdjustedThreshold(base: number, personality: TraderState['pe
   return base - aggressionPull + disciplinePull;
 }
 
+// Completed research gives a small confidence-gate improvement, but does not
+// rewrite strategy logic yet. Flat, capped bonus — not scaled by number of
+// completed projects, and does not touch entry conditions, position sizing,
+// or SL/TP.
+function researchAdjustedThreshold(
+  base: number,
+  personality: TraderState['personality'],
+  researchProjects: TraderState['researchProjects']
+): number {
+  const hasCompletedResearch = researchProjects.some((p) => p.status === 'COMPLETE');
+  const researchBonus = hasCompletedResearch ? 3 : 0;
+  return personalityAdjustedThreshold(base, personality) - researchBonus;
+}
+
 // ─── Research project ticker ───────────────────────────────────────────────
 
 function generateResearchFinding(id: TraderState['id'], progress: number, tradesReviewed: number): string {
@@ -225,7 +239,7 @@ export function runICTCycle(
         `Patience. Setup not ready. Conditions: ${bullConditions}/3 bull, ${bearConditions}/3 bear.`,
       ]);
 
-  if (maxCond >= 2 && confidence >= personalityAdjustedThreshold(55, s.personality) && s.balance > 50) {
+  if (maxCond >= 2 && confidence >= researchAdjustedThreshold(55, s.personality, s.researchProjects) && s.balance > 50) {
     const direction = bullConditions >= bearConditions ? 'BUY' : 'SELL';
     const slDist    = atr1H * 1.2;
     const reasonParts: string[] = [];
@@ -374,7 +388,7 @@ export function runTrendCycle(
       ])
     : `Neutral. SMA gap only ${smaDiff.toFixed(0)}pts. Not tradeable yet.`;
 
-  const canEnter = ((atSMA20bull && bullMom) || (atSMA20bear && bearMom)) && confidence >= personalityAdjustedThreshold(60, s.personality) && s.balance > 50;
+  const canEnter = ((atSMA20bull && bullMom) || (atSMA20bear && bearMom)) && confidence >= researchAdjustedThreshold(60, s.personality, s.researchProjects) && s.balance > 50;
 
   if (canEnter) {
     const direction = atSMA20bull ? 'BUY' : 'SELL';
@@ -497,7 +511,7 @@ export function runBreakoutCycle(
       ])
     : `Range too wide at ${rangeSize.toFixed(0)}pts. ATR: ${atr1H.toFixed(0)}. Need < ${(atr1H * 1.6).toFixed(0)}pts.`;
 
-  const canEnter = (breakoutUp || breakoutDown) && isCompressed && confidence >= personalityAdjustedThreshold(50, s.personality) && s.balance > 50;
+  const canEnter = (breakoutUp || breakoutDown) && isCompressed && confidence >= researchAdjustedThreshold(50, s.personality, s.researchProjects) && s.balance > 50;
 
   if (canEnter) {
     const direction  = breakoutUp ? 'BUY' : 'SELL';
