@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { candles1H, candles4H, getLatestPrice } from "../data/demoMarketData";
 import { getInitialTraderStates, type TraderState, type TraderId } from "../simulation/traderEngine";
 import { runICTCycle, runTrendCycle, runBreakoutCycle } from "../simulation/traderStrategies";
@@ -542,6 +542,153 @@ function JournalView({ trader, accent }: { trader: TraderState; accent: string }
   );
 }
 
+// ─── Leaderboard ────────────────────────────────────────────────────────
+
+type RankMetric = "balance" | "winRate" | "totalPL" | "avgR";
+
+interface LeaderboardRow {
+  id: TraderId;
+  name: string;
+  accent: string;
+  status: string;
+  balance: number;
+  totalTrades: number;
+  winRate: number;
+  totalPL: number;
+  avgR: number;
+  bestTrade: number;
+  worstTrade: number;
+  activeResearch: number;
+}
+
+const RANK_LABELS: Record<RankMetric, string> = {
+  balance: "BALANCE",
+  winRate: "WIN RATE",
+  totalPL: "TOTAL P/L",
+  avgR: "AVG R",
+};
+
+function buildLeaderboardRows(traderStates: TraderState[]): LeaderboardRow[] {
+  return traderStates.map((t) => {
+    const cfg = TRADER_CONFIG[t.id];
+    const trades = t.closedTrades;
+    const totalTrades = trades.length;
+    const wins = t.journal.filter((j) => j.outcome === "WIN").length;
+    const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 100) : 0;
+    const totalPL = trades.reduce((sum, tr) => sum + tr.balanceChange, 0);
+    const avgR = totalTrades > 0 ? trades.reduce((sum, tr) => sum + tr.rMultiple, 0) / totalTrades : 0;
+    const bestTrade = totalTrades > 0 ? Math.max(...trades.map((tr) => tr.rMultiple)) : 0;
+    const worstTrade = totalTrades > 0 ? Math.min(...trades.map((tr) => tr.rMultiple)) : 0;
+    const activeResearch = t.researchProjects.filter((p) => p.status === "ACTIVE").length;
+
+    return {
+      id: t.id,
+      name: t.name,
+      accent: cfg.accent,
+      status: t.status,
+      balance: t.balance,
+      totalTrades,
+      winRate,
+      totalPL,
+      avgR,
+      bestTrade,
+      worstTrade,
+      activeResearch,
+    };
+  });
+}
+
+function Leaderboard({
+  traderStates,
+  rankBy,
+  onRankByChange,
+}: {
+  traderStates: TraderState[];
+  rankBy: RankMetric;
+  onRankByChange: (m: RankMetric) => void;
+}) {
+  const rows = useMemo(() => {
+    const built = buildLeaderboardRows(traderStates);
+    return [...built].sort((a, b) => b[rankBy] - a[rankBy]);
+  }, [traderStates, rankBy]);
+
+  return (
+    <section className="border-b border-border bg-[#04040a] px-4 py-3" data-testid="leaderboard">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div className="text-[7px] text-muted-foreground">// LEADERBOARD — RANKED BY {RANK_LABELS[rankBy]}</div>
+        <div className="flex gap-1">
+          {(Object.keys(RANK_LABELS) as RankMetric[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => onRankByChange(m)}
+              className="px-2 py-1 text-[6px] border transition-all"
+              style={{
+                borderColor: rankBy === m ? "#00ff88" : "#333",
+                color: rankBy === m ? "#00ff88" : "#666",
+                backgroundColor: rankBy === m ? "#00ff8820" : "transparent",
+              }}
+              data-testid={`btn-rank-${m}`}
+            >
+              {RANK_LABELS[m]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-[6.5px] border-collapse">
+          <thead>
+            <tr className="text-muted-foreground text-left">
+              <th className="py-1 pr-2">#</th>
+              <th className="py-1 pr-2">TRADER</th>
+              <th className="py-1 pr-2">STATUS</th>
+              <th className="py-1 pr-2 text-right">BALANCE</th>
+              <th className="py-1 pr-2 text-right">TRADES</th>
+              <th className="py-1 pr-2 text-right">WIN%</th>
+              <th className="py-1 pr-2 text-right">P/L</th>
+              <th className="py-1 pr-2 text-right">AVG R</th>
+              <th className="py-1 pr-2 text-right">BEST</th>
+              <th className="py-1 pr-2 text-right">WORST</th>
+              <th className="py-1 pr-2 text-right">RESEARCH</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => {
+              const isTop = idx === 0;
+              const inTrade = row.status === "IN TRADE";
+              return (
+                <tr
+                  key={row.id}
+                  data-testid={`leaderboard-row-${row.id}`}
+                  style={{
+                    backgroundColor: isTop ? row.accent + "14" : "transparent",
+                    borderTop: `1px solid ${row.accent}22`,
+                    boxShadow: isTop ? `0 0 8px ${row.accent}55 inset` : "none",
+                  }}
+                >
+                  <td className="py-1 pr-2">
+                    {isTop ? <span style={{ color: "#ffcc00" }}>#1 ★</span> : `#${idx + 1}`}
+                  </td>
+                  <td className="py-1 pr-2 font-bold" style={{ color: row.accent }}>{row.name}</td>
+                  <td className="py-1 pr-2 text-muted-foreground">{inTrade ? "IN TRADE" : "WAITING"}</td>
+                  <td className="py-1 pr-2 text-right">{fmtBal(row.balance)}</td>
+                  <td className="py-1 pr-2 text-right">{row.totalTrades}</td>
+                  <td className="py-1 pr-2 text-right">{row.winRate}%</td>
+                  <td className="py-1 pr-2 text-right" style={{ color: row.totalPL >= 0 ? "#00ff88" : "#ff4444" }}>{fmtPL(row.totalPL)}</td>
+                  <td className="py-1 pr-2 text-right">{row.avgR >= 0 ? "+" : ""}{row.avgR.toFixed(1)}R</td>
+                  <td className="py-1 pr-2 text-right" style={{ color: "#00ff88" }}>{row.bestTrade > 0 ? "+" : ""}{row.bestTrade.toFixed(1)}R</td>
+                  <td className="py-1 pr-2 text-right" style={{ color: "#ff4444" }}>{row.worstTrade.toFixed(1)}R</td>
+                  <td className="py-1 pr-2 text-right">{row.activeResearch}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────
 
 export default function TradingFloor() {
@@ -558,6 +705,7 @@ export default function TradingFloor() {
   const [activeModal, setActiveModal] = useState<{ type: string; traderId?: TraderId } | null>(null);
   const [nextCycleIn, setNextCycleIn] = useState(35);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [rankBy, setRankBy] = useState<RankMetric>("balance");
   const cycleCounterRef = useRef(0);
   const activityIdRef = useRef(0);
 
@@ -773,6 +921,9 @@ export default function TradingFloor() {
           {lastSavedAt ? `LAST SAVED: ${new Date(lastSavedAt).toLocaleTimeString("en-ZA", { hour12: false })}` : "NOT SAVED YET"}
         </div>
       </section>
+
+      {/* ── Leaderboard ──────────────────────────────────────────────────── */}
+      <Leaderboard traderStates={traderStates} rankBy={rankBy} onRankByChange={setRankBy} />
 
       {/* ── Trader Cards ────────────────────────────────────────────────── */}
       <main className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 max-w-6xl mx-auto w-full flex-1">
