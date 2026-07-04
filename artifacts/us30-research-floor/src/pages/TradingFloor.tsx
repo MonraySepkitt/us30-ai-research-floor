@@ -3,6 +3,7 @@ import { candles1H, candles4H, getLatestPrice } from "../data/demoMarketData";
 import { getInitialTraderStates, type TraderState, type TraderId } from "../simulation/traderEngine";
 import { runICTCycle, runTrendCycle, runBreakoutCycle } from "../simulation/traderStrategies";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../lib/persistence";
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 // ─── Visual config (accent colours, no simulation data) ───────────────────
 
@@ -384,6 +385,19 @@ function JournalView({ trader, accent }: { trader: TraderState; accent: string }
   const totalPL = journal.reduce((sum, j) => sum + j.balanceChange, 0);
   const activeResearch = trader.researchProjects.filter((p) => p.status === "ACTIVE");
 
+  // ── Equity curve (derived, windowed to last 20 closed trades) ──────────
+  const equityCurve = useMemo(() => {
+    const chronological = [...trader.closedTrades].reverse();
+    const windowTotal = chronological.reduce((sum, t) => sum + t.balanceChange, 0);
+    let running = trader.balance - windowTotal;
+    const points = [{ trade: 0, balance: Math.round(running * 100) / 100 }];
+    chronological.forEach((t, i) => {
+      running += t.balanceChange;
+      points.push({ trade: i + 1, balance: Math.round(running * 100) / 100 });
+    });
+    return points;
+  }, [trader.closedTrades, trader.balance]);
+
   return (
     <div className="flex flex-col gap-0 font-mono text-[7px]" style={{ color: accent }}>
       {/* ── Tab bar ──────────────────────────────────────── */}
@@ -417,6 +431,43 @@ function JournalView({ trader, accent }: { trader: TraderState; accent: string }
               <div><span className="text-muted-foreground">TOTAL P/L: </span><span style={{ color: totalPL >= 0 ? "#00ff88" : "#ff4444" }}>{fmtPL(totalPL)}</span></div>
               <div><span className="text-muted-foreground">BALANCE: </span>{fmtBal(trader.balance)}</div>
             </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground mb-1">EQUITY CURVE (LAST {Math.min(trader.closedTrades.length, 20)} TRADES)</div>
+            {journal.length === 0 ? (
+              <div className="text-muted-foreground border p-3" style={{ borderColor: accent + "33" }}>
+                No trades closed yet. Equity curve will populate as trades complete.
+              </div>
+            ) : (
+              <div className="border p-2" style={{ borderColor: accent + "33", backgroundColor: accent + "08" }}>
+                <ResponsiveContainer width="100%" height={110}>
+                  <AreaChart data={equityCurve} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id={`equityFill-${trader.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={accent} stopOpacity={0.45} />
+                        <stop offset="100%" stopColor={accent} stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke={accent + "22"} vertical={false} />
+                    <XAxis dataKey="trade" tick={{ fill: "#666", fontSize: 6 }} stroke={accent + "44"} />
+                    <YAxis
+                      domain={["auto", "auto"]}
+                      tick={{ fill: "#666", fontSize: 6 }}
+                      stroke={accent + "44"}
+                      width={40}
+                      tickFormatter={(v: number) => `R${v}`}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#04040a", border: `1px solid ${accent}`, fontSize: 7, fontFamily: "monospace" }}
+                      labelStyle={{ color: accent }}
+                      formatter={(value: number) => [fmtBal(value), "BALANCE"]}
+                      labelFormatter={(label: number) => (label === 0 ? "START" : `TRADE #${label}`)}
+                    />
+                    <Area type="monotone" dataKey="balance" stroke={accent} strokeWidth={1.5} fill={`url(#equityFill-${trader.id})`} dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
           <div>
             <div className="text-muted-foreground mb-1">CURRENT BIAS &amp; FOCUS</div>
