@@ -103,14 +103,14 @@ interface ChatMessage {
 
 // ─── Rule-based chat reply generator (no external AI/API calls) ──────────
 
-function generateChatReply(message: string, traderStates: TraderState[]): ChatMessage {
+function generateChatReply(message: string, traderStates: TraderState[], forcedSpeaker?: TraderState): ChatMessage {
   const lower = message.toLowerCase();
   const nowTime = getSASTTime();
 
   const mentioned = traderStates.find((t) => lower.includes(t.id) || lower.includes(t.name.toLowerCase()));
   const rows = buildLeaderboardRows(traderStates);
 
-  const speaker = mentioned ?? traderStates[Math.floor(Math.random() * traderStates.length)];
+  const speaker = forcedSpeaker ?? mentioned ?? traderStates[Math.floor(Math.random() * traderStates.length)];
   const cfg = TRADER_CONFIG[speaker.id];
   const row = rows.find((r) => r.id === speaker.id);
   const rank = rows.findIndex((r) => r.id === speaker.id) + 1;
@@ -258,7 +258,16 @@ function PCSection({
   );
 }
 
-function PCView({ trader, accent }: { trader: TraderState; accent: string }) {
+function PCView({
+  trader, accent, chatMessages, chatInput, onChatInputChange, onSendChat,
+}: {
+  trader: TraderState;
+  accent: string;
+  chatMessages: ChatMessage[];
+  chatInput: string;
+  onChatInputChange: (value: string) => void;
+  onSendChat: () => void;
+}) {
   const pos = trader.openPosition;
   return (
     <div className="flex flex-col gap-0 font-mono text-[7px]" style={{ color: accent }}>
@@ -414,6 +423,46 @@ function PCView({ trader, accent }: { trader: TraderState; accent: string }) {
             </div>
           ))
         )}
+      </PCSection>
+
+      {/* ── Trader Chat ──────────────────────────────────── */}
+      <PCSection title="// TRADER CHAT" accent={accent} defaultOpen={false}>
+        <div className="flex flex-col gap-[6px] max-h-[160px] overflow-y-auto pb-2">
+          {chatMessages.length === 0 ? (
+            <div className="text-muted-foreground">No messages yet. Ask about bias, position, research, journal, mistakes, or performance.</div>
+          ) : (
+            chatMessages.map((entry, i) => (
+              <div key={i} className="flex gap-2 items-baseline">
+                <span className="text-muted-foreground shrink-0 text-[6px]">[{entry.time}]</span>
+                <span className="font-bold shrink-0" style={{ color: entry.color }}>{entry.name}:</span>
+                <span className="opacity-90">{entry.msg}</span>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="mt-2 border-t pt-2 flex items-center gap-2" style={{ borderColor: accent + "33" }}>
+          <span>&gt;</span>
+          <input
+            type="text"
+            value={chatInput}
+            onChange={(e) => onChatInputChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSendChat();
+            }}
+            placeholder={`[ask ${trader.name}...]`}
+            className="bg-transparent border-none outline-none flex-1 text-[7px]"
+            style={{ color: accent }}
+            data-testid={`pc-chat-input-${trader.id}`}
+          />
+          <button
+            onClick={onSendChat}
+            className="border px-2 py-[2px] text-[7px] hover:opacity-80 transition-all"
+            style={{ borderColor: accent, color: accent }}
+            data-testid={`btn-pc-send-chat-${trader.id}`}
+          >
+            [SEND]
+          </button>
+        </div>
       </PCSection>
 
       {/* ── Cursor ───────────────────────────────────────── */}
@@ -812,6 +861,12 @@ export default function TradingFloor() {
     { time: "08:28", name: "SYSTEM", color: "#555", msg: "Simulation active." },
   ]);
   const [chatInput, setChatInput] = useState("");
+  const [pcChatMessages, setPcChatMessages] = useState<Record<TraderId, ChatMessage[]>>({
+    ict: [], trend: [], breakout: [],
+  });
+  const [pcChatInput, setPcChatInput] = useState<Record<TraderId, string>>({
+    ict: "", trend: "", breakout: "",
+  });
   const cycleCounterRef = useRef(0);
   const activityIdRef = useRef(0);
 
@@ -894,6 +949,21 @@ export default function TradingFloor() {
     setChatMessages((prev) => [...prev, userMsg, reply]);
     setChatInput("");
   }, [chatInput, traderStates]);
+
+  const handleSendPCChat = useCallback((traderId: TraderId) => {
+    setPcChatInput((prevInput) => {
+      const trimmed = (prevInput[traderId] ?? "").trim();
+      if (!trimmed) return prevInput;
+      const forcedSpeaker = traderStates.find((t) => t.id === traderId);
+      const userMsg: ChatMessage = { time: getSASTTime(), name: "YOU", color: "#ffffff", msg: trimmed };
+      const reply = generateChatReply(trimmed, traderStates, forcedSpeaker);
+      setPcChatMessages((prev) => ({
+        ...prev,
+        [traderId]: [...prev[traderId], userMsg, reply],
+      }));
+      return { ...prevInput, [traderId]: "" };
+    });
+  }, [traderStates]);
 
   // ── Clock & market status ───────────────────────────────────────────────
   useEffect(() => {
@@ -1276,6 +1346,12 @@ export default function TradingFloor() {
                 <PCView
                   trader={activeTrader}
                   accent={TRADER_CONFIG[activeTrader.id].accent}
+                  chatMessages={pcChatMessages[activeTrader.id]}
+                  chatInput={pcChatInput[activeTrader.id]}
+                  onChatInputChange={(value) =>
+                    setPcChatInput((prev) => ({ ...prev, [activeTrader.id]: value }))
+                  }
+                  onSendChat={() => handleSendPCChat(activeTrader.id)}
                 />
               )}
 
