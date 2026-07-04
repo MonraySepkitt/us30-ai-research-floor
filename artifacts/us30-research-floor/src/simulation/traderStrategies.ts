@@ -126,6 +126,71 @@ function generateResearchFinding(id: TraderState['id'], progress: number, trades
   return `Research COMPLETE (${tradesReviewed} trades). 4-candle compression minimum validated. ATR < 1.3× avg confirmed. Both rules added as hard entry gates.`;
 }
 
+// ─── Follow-up research pool (Phase 12) ────────────────────────────────────
+// Small hardcoded pool of follow-up questions per trader, used only to seed a
+// new ACTIVE project once an existing one completes. No external AI/API calls.
+
+const FOLLOW_UP_RESEARCH: Record<TraderState['id'], { question: string; reason: string; proposedStrategyChange: string }[]> = {
+  ict: [
+    {
+      question: 'Do FVG entries taken after a full displacement candle outperform entries taken without one?',
+      reason: 'Some FVG fills are being taken immediately without confirming a strong displacement move, which may be lowering entry quality.',
+      proposedStrategyChange: 'Require a clear displacement candle before any FVG fill entry is considered valid.',
+    },
+    {
+      question: 'Does entry quality improve when only trading the first liquidity sweep of the session vs subsequent sweeps?',
+      reason: 'Multiple sweeps sometimes occur in one session, and later sweeps may carry less reliable follow-through.',
+      proposedStrategyChange: 'Restrict entries to the first qualifying liquidity sweep of the session only.',
+    },
+  ],
+  trend: [
+    {
+      question: 'Does adding a minimum 3-candle pullback duration filter improve win rate on SMA20 entries?',
+      reason: 'Some pullbacks to SMA20 are very shallow and quick, which may not offer enough confirmation before entry.',
+      proposedStrategyChange: 'Require the pullback to SMA20 to last at least 3 candles before considering entry.',
+    },
+    {
+      question: 'Do trades taken with both 4H and 1H trend alignment outperform 1H-only trend entries?',
+      reason: '1H trend entries are sometimes taken without checking whether the 4H trend agrees, which may add noise.',
+      proposedStrategyChange: 'Add a 4H trend alignment check before any 1H pullback entry is taken.',
+    },
+  ],
+  breakout: [
+    {
+      question: 'Does requiring ATR expansion confirmation on the breakout candle reduce false breakouts further?',
+      reason: 'Some breakout candles occur without a clear expansion in volatility, which may correlate with more false breaks.',
+      proposedStrategyChange: 'Require the breakout candle to show ATR expansion versus the prior candle before entry.',
+    },
+    {
+      question: 'Do breakouts following a prior failed breakout (double compression) have higher follow-through rates?',
+      reason: 'Ranges that fail to break out once and re-compress may produce stronger follow-through on the second attempt.',
+      proposedStrategyChange: 'Flag double-compression setups as higher priority breakout candidates.',
+    },
+  ],
+};
+
+function generateNextResearchProject(state: TraderState): TraderState['researchProjects'][number] | null {
+  if (state.researchProjects.length >= 5) return null;
+
+  const pool = FOLLOW_UP_RESEARCH[state.id];
+  const existingQuestions = new Set(state.researchProjects.map((p) => p.question));
+  const next = pool.find((q) => !existingQuestions.has(q.question));
+  if (!next) return null;
+
+  const nextNum = state.researchProjects.length + 1;
+  return {
+    id: `${state.id}-r${nextNum}`,
+    question: next.question,
+    reason: next.reason,
+    status: 'ACTIVE',
+    progress: 0,
+    tradesReviewed: 0,
+    currentFindings: 'Research just started. Gathering initial data.',
+    proposedStrategyChange: next.proposedStrategyChange,
+    lastUpdated: getSASTHHMM(),
+  };
+}
+
 function tickResearch(state: TraderState): TraderState {
   if (Math.random() > 0.28) return state;
   const active = state.researchProjects.filter((p) => p.status === 'ACTIVE');
@@ -134,17 +199,22 @@ function tickResearch(state: TraderState): TraderState {
   const project = active[Math.floor(Math.random() * active.length)];
   const gain = Math.floor(Math.random() * 9) + 4;
   const newProgress = Math.min(100, project.progress + gain);
-  const newStatus = newProgress >= 100 ? 'COMPLETE' : 'ACTIVE';
+  const justCompleted = newProgress >= 100 && project.status === 'ACTIVE';
+  const newStatus: 'ACTIVE' | 'COMPLETE' = newProgress >= 100 ? 'COMPLETE' : 'ACTIVE';
   const newTradesReviewed = Math.max(project.tradesReviewed, state.closedTrades.length);
   const findings = generateResearchFinding(state.id, newProgress, newTradesReviewed);
 
+  const updatedProjects = state.researchProjects.map((p) =>
+    p.id === project.id
+      ? { ...p, progress: newProgress, status: newStatus, tradesReviewed: newTradesReviewed, currentFindings: findings, lastUpdated: getSASTHHMM() }
+      : p
+  );
+
+  const nextProject = justCompleted ? generateNextResearchProject({ ...state, researchProjects: updatedProjects }) : null;
+
   return {
     ...state,
-    researchProjects: state.researchProjects.map((p) =>
-      p.id === project.id
-        ? { ...p, progress: newProgress, status: newStatus, tradesReviewed: newTradesReviewed, currentFindings: findings, lastUpdated: getSASTHHMM() }
-        : p
-    ),
+    researchProjects: nextProject ? [...updatedProjects, nextProject] : updatedProjects,
   };
 }
 
