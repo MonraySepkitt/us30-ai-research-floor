@@ -92,6 +92,58 @@ interface ActivityEntry {
   msg: string;
 }
 
+// ─── Chat message ───────────────────────────────────────────────────────
+
+interface ChatMessage {
+  time: string;
+  name: string;
+  color: string;
+  msg: string;
+}
+
+// ─── Rule-based chat reply generator (no external AI/API calls) ──────────
+
+function generateChatReply(message: string, traderStates: TraderState[]): ChatMessage {
+  const lower = message.toLowerCase();
+  const nowTime = getSASTTime();
+
+  const mentioned = traderStates.find((t) => lower.includes(t.id) || lower.includes(t.name.toLowerCase()));
+  const rows = buildLeaderboardRows(traderStates);
+
+  const speaker = mentioned ?? traderStates[Math.floor(Math.random() * traderStates.length)];
+  const cfg = TRADER_CONFIG[speaker.id];
+  const row = rows.find((r) => r.id === speaker.id);
+  const rank = rows.findIndex((r) => r.id === speaker.id) + 1;
+
+  let msg: string;
+
+  if (lower.includes("rank") || lower.includes("leaderboard") || lower.includes("place")) {
+    msg = `Currently ranked #${rank} of ${rows.length}. Balance ${fmtBal(speaker.balance)}, win rate ${row?.winRate ?? 0}%.`;
+  } else if (lower.includes("position") || lower.includes("trade") || lower.includes("open")) {
+    msg = speaker.openPosition
+      ? `In a live ${speaker.openPosition.direction} from ${speaker.openPosition.entryPrice.toFixed(0)}. ${speaker.openPosition.entryReason}`
+      : `No open position right now. ${speaker.currentAction}.`;
+  } else if (lower.includes("research")) {
+    const active = speaker.researchProjects.filter((p) => p.status === "ACTIVE");
+    msg = active.length > 0
+      ? `Working on: "${active[0].question}" — ${active[0].progress}% complete.`
+      : "No active research projects right now.";
+  } else if (lower.includes("lesson") || lower.includes("journal") || lower.includes("mistake")) {
+    const lastEntry = speaker.journal[0];
+    msg = lastEntry
+      ? `Last lesson: ${lastEntry.lessonLearned}`
+      : "No trades closed yet — nothing to journal.";
+  } else if (lower.includes("balance") || lower.includes("pnl") || lower.includes("p/l") || lower.includes("profit")) {
+    msg = `Balance: ${fmtBal(speaker.balance)}. Total trades: ${speaker.journal.length}.`;
+  } else if (lower.includes("bias") || lower.includes("confidence") || lower.includes("think")) {
+    msg = `Bias is ${speaker.bias.toUpperCase()} at ${speaker.confidence}% confidence. ${speaker.strategyFocus}`;
+  } else {
+    msg = `${speaker.currentAction}. Bias ${speaker.bias.toUpperCase()}, confidence ${speaker.confidence}%.`;
+  }
+
+  return { time: nowTime, name: speaker.name.replace(/\s+/g, "_").toUpperCase(), color: cfg.accent, msg };
+}
+
 // ─── Animated trader desk ─────────────────────────────────────────────────
 
 function TraderDesk({ trader }: { trader: TraderState }) {
@@ -757,6 +809,15 @@ export default function TradingFloor() {
   const [nextCycleIn, setNextCycleIn] = useState(35);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [rankBy, setRankBy] = useState<RankMetric>("balance");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
+    { time: "08:12", name: "FLOOR_MASTER", color: "#00ccff", msg: "Morning briefing. All traders check in." },
+    { time: "08:13", name: "ICT_TRADER", color: TRADER_CONFIG.ict.accent, msg: `Checked in. Bias ${traderStates[0].bias.toUpperCase()}. Confidence ${traderStates[0].confidence}%.` },
+    { time: "08:15", name: "TREND_TRADER", color: TRADER_CONFIG.trend.accent, msg: `${traderStates[1].currentAction}.` },
+    { time: "08:18", name: "BREAKOUT_TRADER", color: TRADER_CONFIG.breakout.accent, msg: `${traderStates[2].currentAction}.` },
+    { time: "08:20", name: "FLOOR_MASTER", color: "#00ccff", msg: "Risk below 1% today. Stay disciplined. No FOMO." },
+    { time: "08:28", name: "SYSTEM", color: "#555", msg: "Simulation active." },
+  ]);
+  const [chatInput, setChatInput] = useState("");
   const cycleCounterRef = useRef(0);
   const activityIdRef = useRef(0);
 
@@ -788,6 +849,15 @@ export default function TradingFloor() {
     clearPersistedState();
     setLastSavedAt(null);
   }, []);
+
+  const handleSendChat = useCallback(() => {
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+    const userMsg: ChatMessage = { time: getSASTTime(), name: "YOU", color: "#ffffff", msg: trimmed };
+    const reply = generateChatReply(trimmed, traderStates);
+    setChatMessages((prev) => [...prev, userMsg, reply]);
+    setChatInput("");
+  }, [chatInput, traderStates]);
 
   // ── Clock & market status ───────────────────────────────────────────────
   useEffect(() => {
@@ -1185,14 +1255,7 @@ export default function TradingFloor() {
               {activeModal.type === "chat" && (
                 <div className="flex flex-col h-full">
                   <div className="flex-1 flex flex-col gap-[6px]">
-                    {[
-                      { time: "08:12", name: "FLOOR_MASTER", color: "#00ccff", msg: "Morning briefing. All traders check in." },
-                      { time: "08:13", name: "ICT_TRADER", color: TRADER_CONFIG.ict.accent, msg: `Checked in. Bias ${traderStates[0].bias.toUpperCase()}. Confidence ${traderStates[0].confidence}%.` },
-                      { time: "08:15", name: "TREND_TRADER", color: TRADER_CONFIG.trend.accent, msg: `${traderStates[1].currentAction}.` },
-                      { time: "08:18", name: "BREAKOUT_TRADER", color: TRADER_CONFIG.breakout.accent, msg: `${traderStates[2].currentAction}.` },
-                      { time: "08:20", name: "FLOOR_MASTER", color: "#00ccff", msg: "Risk below 1% today. Stay disciplined. No FOMO." },
-                      { time: "08:28", name: "SYSTEM", color: "#555", msg: `Simulation active. Cycle #${cycleCounterRef.current}. Next cycle in ~${nextCycleIn}s.` },
-                    ].map((entry, i) => (
+                    {chatMessages.map((entry, i) => (
                       <div key={i} className="flex gap-2 items-baseline">
                         <span className="text-muted-foreground shrink-0 text-[7px]">[{entry.time}]</span>
                         <span className="font-bold shrink-0" style={{ color: entry.color }}>{entry.name}:</span>
@@ -1202,8 +1265,24 @@ export default function TradingFloor() {
                   </div>
                   <div className="mt-5 border-t border-border pt-3 flex items-center gap-2">
                     <span className="text-primary">&gt;</span>
-                    <input type="text" placeholder="[type message...]" className="bg-transparent border-none outline-none flex-1 text-[8px] text-foreground" data-testid="chat-input" />
-                    <button className="border border-primary px-3 py-1 text-primary text-[8px] hover:bg-primary/20 transition-all" data-testid="btn-send-chat">[SEND]</button>
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSendChat();
+                      }}
+                      placeholder="[type message...]"
+                      className="bg-transparent border-none outline-none flex-1 text-[8px] text-foreground"
+                      data-testid="chat-input"
+                    />
+                    <button
+                      onClick={handleSendChat}
+                      className="border border-primary px-3 py-1 text-primary text-[8px] hover:bg-primary/20 transition-all"
+                      data-testid="btn-send-chat"
+                    >
+                      [SEND]
+                    </button>
                   </div>
                 </div>
               )}
