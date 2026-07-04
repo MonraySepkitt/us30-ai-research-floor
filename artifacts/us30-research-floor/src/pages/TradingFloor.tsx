@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { candles1H, candles4H, getLatestPrice } from "../data/demoMarketData";
-import { getInitialTraderStates, type TraderState, type TraderId } from "../simulation/traderEngine";
+import { getInitialTraderStates, getSASTHHMM, type TraderState, type TraderId } from "../simulation/traderEngine";
 import { runICTCycle, runTrendCycle, runBreakoutCycle } from "../simulation/traderStrategies";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../lib/persistence";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
@@ -850,6 +850,47 @@ export default function TradingFloor() {
     setLastSavedAt(null);
   }, []);
 
+  const handleDemote = useCallback((traderId: TraderId) => {
+    const original = getInitialTraderStates().find((t) => t.id === traderId);
+    if (!original) return;
+
+    setTraderStates((prev) =>
+      prev.map((t) => {
+        if (t.id !== traderId) return t;
+        return {
+          ...t,
+          status: original.status,
+          bias: original.bias,
+          confidence: original.confidence,
+          currentAction: original.currentAction,
+          internalReasoning: original.internalReasoning,
+          recentDecision: original.recentDecision,
+          thesis: original.thesis,
+          marketNarrative: original.marketNarrative,
+          bullCase: original.bullCase,
+          bearCase: original.bearCase,
+          waitingFor: original.waitingFor,
+          tradeTrigger: original.tradeTrigger,
+          noTradeReason: original.noTradeReason,
+          riskPlan: original.riskPlan,
+          whatWouldChangeMind: original.whatWouldChangeMind,
+          reasoningMemory: [{ time: getSASTHHMM(), note: `Demoted and restarted. ${original.reasoningMemory[0]?.note ?? ""}` }],
+          openPosition: null,
+          closedTrades: [],
+          balance: original.balance,
+          journal: [],
+          lossProtocol: [],
+          researchProjects: original.researchProjects.map((p) => ({ ...p })),
+        };
+      })
+    );
+
+    setActivityLog((prev) => [
+      { id: ++activityIdRef.current, time: getSASTHHMM(), traderId, msg: `${original.name} was demoted and restarted from scratch.` },
+      ...prev,
+    ].slice(0, 8));
+  }, []);
+
   const handleSendChat = useCallback(() => {
     const trimmed = chatInput.trim();
     if (!trimmed) return;
@@ -1506,7 +1547,17 @@ export default function TradingFloor() {
                   </div>
                   <div className="flex gap-4">
                     <button onClick={closeModal} className="border border-border px-4 py-2 text-[8px] hover:bg-white/10 transition-all" data-testid="btn-demote-cancel">[CANCEL]</button>
-                    <button onClick={closeModal} className="border border-destructive text-destructive px-4 py-2 text-[8px] hover:bg-destructive/20 transition-all" style={{ boxShadow: "0 0 10px rgba(255,0,0,0.4)" }} data-testid="btn-demote-confirm">[CONFIRM]</button>
+                    <button
+                      onClick={() => {
+                        handleDemote(activeTrader.id);
+                        closeModal();
+                      }}
+                      className="border border-destructive text-destructive px-4 py-2 text-[8px] hover:bg-destructive/20 transition-all"
+                      style={{ boxShadow: "0 0 10px rgba(255,0,0,0.4)" }}
+                      data-testid="btn-demote-confirm"
+                    >
+                      [CONFIRM]
+                    </button>
                   </div>
                 </div>
               )}
