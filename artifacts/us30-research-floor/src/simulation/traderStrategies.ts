@@ -75,6 +75,18 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+// Personality-adjusted entry threshold.
+// Aggression slightly lowers the required confidence (more willing to enter).
+// Discipline slightly raises the required confidence (more selective about entries).
+// Patience is intentionally not applied here — it requires tracking how long a
+// setup has persisted across cycles, which doesn't exist yet. Deferred to a
+// future phase once setup-persistence tracking is added.
+function personalityAdjustedThreshold(base: number, personality: TraderState['personality']): number {
+  const aggressionPull = (personality.aggression - 50) * 0.1;
+  const disciplinePull = (personality.discipline - 50) * 0.1;
+  return base - aggressionPull + disciplinePull;
+}
+
 // ─── Research project ticker ───────────────────────────────────────────────
 
 function generateResearchFinding(id: TraderState['id'], progress: number, tradesReviewed: number): string {
@@ -213,7 +225,7 @@ export function runICTCycle(
         `Patience. Setup not ready. Conditions: ${bullConditions}/3 bull, ${bearConditions}/3 bear.`,
       ]);
 
-  if (maxCond >= 2 && confidence >= 55 && s.balance > 50) {
+  if (maxCond >= 2 && confidence >= personalityAdjustedThreshold(55, s.personality) && s.balance > 50) {
     const direction = bullConditions >= bearConditions ? 'BUY' : 'SELL';
     const slDist    = atr1H * 1.2;
     const reasonParts: string[] = [];
@@ -362,7 +374,7 @@ export function runTrendCycle(
       ])
     : `Neutral. SMA gap only ${smaDiff.toFixed(0)}pts. Not tradeable yet.`;
 
-  const canEnter = ((atSMA20bull && bullMom) || (atSMA20bear && bearMom)) && confidence >= 60 && s.balance > 50;
+  const canEnter = ((atSMA20bull && bullMom) || (atSMA20bear && bearMom)) && confidence >= personalityAdjustedThreshold(60, s.personality) && s.balance > 50;
 
   if (canEnter) {
     const direction = atSMA20bull ? 'BUY' : 'SELL';
@@ -485,7 +497,7 @@ export function runBreakoutCycle(
       ])
     : `Range too wide at ${rangeSize.toFixed(0)}pts. ATR: ${atr1H.toFixed(0)}. Need < ${(atr1H * 1.6).toFixed(0)}pts.`;
 
-  const canEnter = (breakoutUp || breakoutDown) && isCompressed && confidence >= 50 && s.balance > 50;
+  const canEnter = (breakoutUp || breakoutDown) && isCompressed && confidence >= personalityAdjustedThreshold(50, s.personality) && s.balance > 50;
 
   if (canEnter) {
     const direction  = breakoutUp ? 'BUY' : 'SELL';
