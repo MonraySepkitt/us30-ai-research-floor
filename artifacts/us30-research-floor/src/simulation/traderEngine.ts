@@ -113,6 +113,7 @@ export interface TraderState {
   journal: JournalEntry[];
   lossProtocol: LossProtocol[];
   researchProjects: ResearchProject[];
+  equityHistory: { trade: number; balance: number }[];
 }
 
 export interface SimEvent {
@@ -388,6 +389,7 @@ export function getInitialTraderStates(): TraderState[] {
       personality: { discipline: 68, aggression: 45, patience: 82 },
       journal: [],
       lossProtocol: [],
+      equityHistory: [{ trade: 0, balance: 1000 }],
       researchProjects: [
         {
           id: 'ict-r1',
@@ -438,6 +440,7 @@ export function getInitialTraderStates(): TraderState[] {
       personality: { discipline: 75, aggression: 60, patience: 70 },
       journal: [],
       lossProtocol: [],
+      equityHistory: [{ trade: 0, balance: 1000 }],
       researchProjects: [
         {
           id: 'trend-r1',
@@ -488,6 +491,7 @@ export function getInitialTraderStates(): TraderState[] {
       personality: { discipline: 50, aggression: 80, patience: 35 },
       journal: [],
       lossProtocol: [],
+      equityHistory: [{ trade: 0, balance: 1000 }],
       researchProjects: [
         {
           id: 'breakout-r1',
@@ -570,6 +574,10 @@ export function checkAndUpdatePosition(
         reasoningMemory: appendReasoning(state.reasoningMemory, memNote),
         journal: [journalEntry, ...state.journal].slice(0, 30),
         lossProtocol: newLossProtocol,
+        equityHistory: [
+          ...state.equityHistory,
+          { trade: state.equityHistory.length, balance: newBalance },
+        ],
       },
       event: { traderId: state.id, msg },
     };

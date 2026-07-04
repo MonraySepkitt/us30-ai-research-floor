@@ -437,18 +437,8 @@ function JournalView({ trader, accent }: { trader: TraderState; accent: string }
   const totalPL = journal.reduce((sum, j) => sum + j.balanceChange, 0);
   const activeResearch = trader.researchProjects.filter((p) => p.status === "ACTIVE");
 
-  // ── Equity curve (derived, windowed to last 20 closed trades) ──────────
-  const equityCurve = useMemo(() => {
-    const chronological = [...trader.closedTrades].reverse();
-    const windowTotal = chronological.reduce((sum, t) => sum + t.balanceChange, 0);
-    let running = trader.balance - windowTotal;
-    const points = [{ trade: 0, balance: Math.round(running * 100) / 100 }];
-    chronological.forEach((t, i) => {
-      running += t.balanceChange;
-      points.push({ trade: i + 1, balance: Math.round(running * 100) / 100 });
-    });
-    return points;
-  }, [trader.closedTrades, trader.balance]);
+  // ── Equity curve (full-session history, not windowed) ──────────────────
+  const equityCurve = trader.equityHistory;
 
   return (
     <div className="flex flex-col gap-0 font-mono text-[7px]" style={{ color: accent }}>
@@ -485,7 +475,7 @@ function JournalView({ trader, accent }: { trader: TraderState; accent: string }
             </div>
           </div>
           <div>
-            <div className="text-muted-foreground mb-1">EQUITY CURVE (LAST {Math.min(trader.closedTrades.length, 20)} TRADES)</div>
+            <div className="text-muted-foreground mb-1">EQUITY CURVE (FULL SESSION — {Math.max(trader.equityHistory.length - 1, 0)} TRADES)</div>
             {journal.length === 0 ? (
               <div className="text-muted-foreground border p-3" style={{ borderColor: accent + "33" }}>
                 No trades closed yet. Equity curve will populate as trades complete.
@@ -799,7 +789,11 @@ export default function TradingFloor() {
   const [marketOpen, setMarketOpen] = useState(false);
   const [traderStates, setTraderStates] = useState<TraderState[]>(() => {
     const persisted = loadPersistedState<TraderState, ActivityEntry>();
-    return persisted?.traderStates ?? getInitialTraderStates();
+    const loaded = persisted?.traderStates ?? getInitialTraderStates();
+    return loaded.map((t) => ({
+      ...t,
+      equityHistory: t.equityHistory ?? [{ trade: 0, balance: t.balance }],
+    }));
   });
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>(() => {
     const persisted = loadPersistedState<TraderState, ActivityEntry>();
@@ -881,6 +875,7 @@ export default function TradingFloor() {
           journal: [],
           lossProtocol: [],
           researchProjects: original.researchProjects.map((p) => ({ ...p })),
+          equityHistory: [{ trade: 0, balance: original.balance }],
         };
       })
     );
