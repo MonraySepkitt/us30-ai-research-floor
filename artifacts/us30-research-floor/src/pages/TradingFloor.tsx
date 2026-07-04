@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { candles1H, candles4H, getLatestPrice } from "../data/demoMarketData";
 import { getInitialTraderStates, type TraderState, type TraderId } from "../simulation/traderEngine";
 import { runICTCycle, runTrendCycle, runBreakoutCycle } from "../simulation/traderStrategies";
+import { loadPersistedState, savePersistedState, clearPersistedState } from "../lib/persistence";
 
 // ─── Visual config (accent colours, no simulation data) ───────────────────
 
@@ -546,12 +547,48 @@ function JournalView({ trader, accent }: { trader: TraderState; accent: string }
 export default function TradingFloor() {
   const [time, setTime] = useState("");
   const [marketOpen, setMarketOpen] = useState(false);
-  const [traderStates, setTraderStates] = useState<TraderState[]>(getInitialTraderStates);
-  const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
+  const [traderStates, setTraderStates] = useState<TraderState[]>(() => {
+    const persisted = loadPersistedState<TraderState, ActivityEntry>();
+    return persisted?.traderStates ?? getInitialTraderStates();
+  });
+  const [activityLog, setActivityLog] = useState<ActivityEntry[]>(() => {
+    const persisted = loadPersistedState<TraderState, ActivityEntry>();
+    return persisted?.activityLog ?? [];
+  });
   const [activeModal, setActiveModal] = useState<{ type: string; traderId?: TraderId } | null>(null);
   const [nextCycleIn, setNextCycleIn] = useState(35);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const cycleCounterRef = useRef(0);
   const activityIdRef = useRef(0);
+
+  // ── Persistence: auto-save (debounced) ──────────────────────────────────
+  useEffect(() => {
+    const id = setTimeout(() => {
+      savePersistedState(traderStates, activityLog);
+      setLastSavedAt(Date.now());
+    }, 1200);
+    return () => clearTimeout(id);
+  }, [traderStates, activityLog]);
+
+  const handleSaveNow = useCallback(() => {
+    savePersistedState(traderStates, activityLog);
+    setLastSavedAt(Date.now());
+  }, [traderStates, activityLog]);
+
+  const handleResetSimulation = useCallback(() => {
+    const fresh = getInitialTraderStates();
+    setTraderStates(fresh);
+    setActivityLog([]);
+    cycleCounterRef.current = 0;
+    activityIdRef.current = 0;
+    savePersistedState(fresh, []);
+    setLastSavedAt(Date.now());
+  }, []);
+
+  const handleClearSavedData = useCallback(() => {
+    clearPersistedState();
+    setLastSavedAt(null);
+  }, []);
 
   // ── Clock & market status ───────────────────────────────────────────────
   useEffect(() => {
@@ -705,6 +742,35 @@ export default function TradingFloor() {
               <span className="text-foreground truncate">{entry.msg}</span>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* ── Control Panel ───────────────────────────────────────────────── */}
+      <section className="border-b border-border bg-[#04040a] px-4 py-2 flex flex-wrap items-center gap-3" data-testid="control-panel">
+        <div className="text-[7px] text-muted-foreground">// CONTROL PANEL</div>
+        <button
+          onClick={handleSaveNow}
+          className="border border-primary text-primary px-2 py-1 text-[7px] hover:bg-primary/20 transition-all"
+          data-testid="btn-save-now"
+        >
+          [SAVE STATE NOW]
+        </button>
+        <button
+          onClick={handleResetSimulation}
+          className="border border-border px-2 py-1 text-[7px] hover:bg-white/10 transition-all"
+          data-testid="btn-reset-simulation"
+        >
+          [RESET SIMULATION]
+        </button>
+        <button
+          onClick={handleClearSavedData}
+          className="border border-destructive text-destructive px-2 py-1 text-[7px] hover:bg-destructive/20 transition-all"
+          data-testid="btn-clear-saved-data"
+        >
+          [CLEAR SAVED DATA]
+        </button>
+        <div className="text-[6px] text-muted-foreground opacity-60 ml-auto">
+          {lastSavedAt ? `LAST SAVED: ${new Date(lastSavedAt).toLocaleTimeString("en-ZA", { hour12: false })}` : "NOT SAVED YET"}
         </div>
       </section>
 
