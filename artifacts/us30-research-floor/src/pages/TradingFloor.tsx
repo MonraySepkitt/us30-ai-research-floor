@@ -321,6 +321,217 @@ function PCView({ trader, accent }: { trader: TraderState; accent: string }) {
         )}
       </PCSection>
 
+      {/* ── Research Projects ────────────────────────────── */}
+      <PCSection title={`// RESEARCH PROJECTS (${trader.researchProjects.length})`} accent={accent} defaultOpen={false}>
+        {trader.researchProjects.length === 0 ? (
+          <div className="text-muted-foreground">No active research.</div>
+        ) : (
+          trader.researchProjects.map((rp) => (
+            <div key={rp.id} className="flex flex-col gap-1 pb-3 mb-2 border-b" style={{ borderColor: accent + "22" }}>
+              <div>
+                <span className="text-muted-foreground">Q: </span>
+                <span className="opacity-90">{rp.question}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">REASON: </span>
+                <span className="opacity-85">{rp.reason}</span>
+              </div>
+              <div className="flex flex-wrap gap-x-3">
+                <span>
+                  <span className="text-muted-foreground">STATUS: </span>
+                  <span style={{ color: rp.status === "COMPLETE" ? "#00ff88" : rp.status === "REJECTED" ? "#ff4444" : "#ffcc00" }}>
+                    {rp.status}
+                  </span>
+                </span>
+                <span><span className="text-muted-foreground">PROGRESS: </span>{rp.progress}%</span>
+                <span><span className="text-muted-foreground">TRADES REVIEWED: </span>{rp.tradesReviewed}</span>
+              </div>
+              <div className="w-full h-[6px] border" style={{ borderColor: accent + "55" }}>
+                <div className="h-full" style={{ width: `${rp.progress}%`, backgroundColor: accent }} />
+              </div>
+              <div className="mt-1">
+                <span className="text-muted-foreground">FINDINGS: </span>
+                <span className="opacity-85">{rp.currentFindings}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">PROPOSED CHANGE: </span>
+                <span className="opacity-90">{rp.proposedStrategyChange}</span>
+              </div>
+            </div>
+          ))
+        )}
+      </PCSection>
+
+      {/* ── Cursor ───────────────────────────────────────── */}
+      <div className="mt-3 flex items-center gap-1">
+        <span>&gt;</span>
+        <span className="inline-block" style={{ width: 6, height: 12, backgroundColor: accent, animation: "cursorBlink 1s step-end infinite" }} />
+      </div>
+    </div>
+  );
+}
+
+function JournalView({ trader, accent }: { trader: TraderState; accent: string }) {
+  const [tab, setTab] = useState<"SUMMARY" | "TRADES" | "LESSONS" | "MISTAKES" | "IMPROVEMENTS">("SUMMARY");
+  const journal = trader.journal;
+  const losses = trader.lossProtocol;
+  const tabs: Array<typeof tab> = ["SUMMARY", "TRADES", "LESSONS", "MISTAKES", "IMPROVEMENTS"];
+
+  const wins = journal.filter((j) => j.outcome === "WIN").length;
+  const lossCount = journal.filter((j) => j.outcome === "LOSS").length;
+  const winRate = journal.length > 0 ? Math.round((wins / journal.length) * 100) : 0;
+  const totalPL = journal.reduce((sum, j) => sum + j.balanceChange, 0);
+  const activeResearch = trader.researchProjects.filter((p) => p.status === "ACTIVE");
+
+  return (
+    <div className="flex flex-col gap-0 font-mono text-[7px]" style={{ color: accent }}>
+      {/* ── Tab bar ──────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-1 pb-3 mb-3 border-b" style={{ borderColor: accent + "44" }}>
+        {tabs.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className="px-2 py-1 text-[7px]"
+            style={{
+              border: `1px solid ${tab === t ? accent : accent + "44"}`,
+              color: tab === t ? accent : "#666",
+              backgroundColor: tab === t ? accent + "20" : "transparent",
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* ── SUMMARY ──────────────────────────────────────── */}
+      {tab === "SUMMARY" && (
+        <div className="flex flex-col gap-4">
+          <div className="border p-3 flex flex-col gap-2" style={{ borderColor: accent + "44", backgroundColor: accent + "0a" }}>
+            <div className="text-muted-foreground mb-1">SESSION STATS</div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+              <div><span className="text-muted-foreground">TRADES LOGGED: </span>{journal.length}</div>
+              <div><span className="text-muted-foreground">WIN RATE: </span>{winRate}%</div>
+              <div><span className="text-muted-foreground">WINS: </span><span style={{ color: "#00ff88" }}>{wins}</span></div>
+              <div><span className="text-muted-foreground">LOSSES: </span><span style={{ color: "#ff4444" }}>{lossCount}</span></div>
+              <div><span className="text-muted-foreground">TOTAL P/L: </span><span style={{ color: totalPL >= 0 ? "#00ff88" : "#ff4444" }}>{fmtPL(totalPL)}</span></div>
+              <div><span className="text-muted-foreground">BALANCE: </span>{fmtBal(trader.balance)}</div>
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground mb-1">CURRENT BIAS &amp; FOCUS</div>
+            <div>Bias: <span style={{ color: trader.bias === "Bullish" ? "#00ff88" : trader.bias === "Bearish" ? "#ff4444" : "#ffcc00" }}>{trader.bias.toUpperCase()}</span> ({trader.confidence}% confidence)</div>
+            <div className="opacity-85 mt-1">Strategy focus: {trader.strategyFocus}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground mb-1">ACTIVE RESEARCH ({activeResearch.length})</div>
+            {activeResearch.length === 0 ? (
+              <div className="text-muted-foreground">No active research projects.</div>
+            ) : (
+              activeResearch.map((rp) => (
+                <div key={rp.id} className="mb-2 opacity-90">
+                  <div>{rp.question}</div>
+                  <div className="w-full h-[5px] border mt-1" style={{ borderColor: accent + "55" }}>
+                    <div className="h-full" style={{ width: `${rp.progress}%`, backgroundColor: accent }} />
+                  </div>
+                  <div className="text-muted-foreground mt-1">{rp.progress}% complete — {rp.tradesReviewed} trades reviewed</div>
+                </div>
+              ))
+            )}
+          </div>
+          {journal.length === 0 && (
+            <div className="text-muted-foreground">No trades closed yet. Journal will populate as trades complete.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── TRADES ───────────────────────────────────────── */}
+      {tab === "TRADES" && (
+        <div className="flex flex-col gap-3">
+          {journal.length === 0 ? (
+            <div className="text-muted-foreground">No trade entries yet. Waiting for the first closed trade.</div>
+          ) : (
+            journal.map((j) => (
+              <div key={j.tradeNumber} className="border p-3 flex flex-col gap-1" style={{ borderColor: accent + "33" }}>
+                <div className="flex justify-between">
+                  <span>
+                    <span className="text-muted-foreground">#{j.tradeNumber} </span>
+                    <span style={{ color: j.direction === "BUY" ? "#00ff88" : "#ff4444" }} className="font-bold">{j.direction}</span>
+                    <span className="text-muted-foreground"> @ </span>{j.entryPrice.toFixed(0)} → {j.exitPrice.toFixed(0)}
+                  </span>
+                  <span style={{ color: j.outcome === "WIN" ? "#00ff88" : j.outcome === "LOSS" ? "#ff4444" : "#ffcc00" }}>
+                    {j.outcome} {j.rMultiple >= 0 ? "+" : ""}{j.rMultiple.toFixed(1)}R
+                  </span>
+                </div>
+                <div className="text-muted-foreground">{j.entryTimeSAST} SAST</div>
+                <div><span className="text-muted-foreground">ENTRY REASON: </span><span className="opacity-85">{j.entryReason}</span></div>
+                <div><span className="text-muted-foreground">EXIT REASON: </span><span className="opacity-85">{j.exitReason}</span></div>
+                <div><span className="text-muted-foreground">BALANCE CHANGE: </span><span style={{ color: j.balanceChange >= 0 ? "#00ff88" : "#ff4444" }}>{fmtPL(j.balanceChange)}</span></div>
+                <div><span className="text-muted-foreground">MARKET CONTEXT: </span><span className="opacity-80">{j.marketContext}</span></div>
+                <div><span className="text-muted-foreground">TFs REVIEWED: </span>{j.timeframesReviewed.join(", ")}</div>
+                {j.mistakes && <div><span className="text-muted-foreground">MISTAKES: </span><span style={{ color: "#ff4444" }}>{j.mistakes}</span></div>}
+                <div><span className="text-muted-foreground">LESSON: </span><span className="opacity-90">{j.lessonLearned}</span></div>
+                <div><span className="text-muted-foreground">IMPROVEMENT: </span><span className="opacity-90">{j.proposedImprovement}</span></div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── LESSONS ──────────────────────────────────────── */}
+      {tab === "LESSONS" && (
+        <div className="flex flex-col gap-2">
+          {journal.length === 0 ? (
+            <div className="text-muted-foreground">No lessons logged yet.</div>
+          ) : (
+            journal.map((j) => (
+              <div key={j.tradeNumber} className="flex gap-2 items-baseline">
+                <span className="text-muted-foreground shrink-0">#{j.tradeNumber}</span>
+                <span className="opacity-90">{j.lessonLearned}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── MISTAKES ─────────────────────────────────────── */}
+      {tab === "MISTAKES" && (
+        <div className="flex flex-col gap-3">
+          {losses.length === 0 ? (
+            <div className="text-muted-foreground">No losses recorded yet — no mistakes to review.</div>
+          ) : (
+            losses.map((lp) => (
+              <div key={lp.tradeNumber} className="border p-3 flex flex-col gap-1" style={{ borderColor: "#ff444444" }}>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">#{lp.tradeNumber} LOSS PROTOCOL</span>
+                  <span className="text-muted-foreground">{lp.timestamp}</span>
+                </div>
+                <div style={{ color: "#ff4444" }}>{lp.lossDescription}</div>
+                <div><span className="text-muted-foreground">WHY: </span><span className="opacity-85">{lp.whyItHappened}</span></div>
+                <div><span className="text-muted-foreground">LESSON: </span><span className="opacity-90">{lp.lessonLearned}</span></div>
+                <div><span className="text-muted-foreground">IMPROVEMENT: </span><span className="opacity-90">{lp.proposedImprovement}</span></div>
+                <div><span className="text-muted-foreground">FUTURE TEST: </span><span className="opacity-80">{lp.futureTestIdea}</span></div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── IMPROVEMENTS ─────────────────────────────────── */}
+      {tab === "IMPROVEMENTS" && (
+        <div className="flex flex-col gap-2">
+          {journal.length === 0 ? (
+            <div className="text-muted-foreground">No improvements logged yet.</div>
+          ) : (
+            journal.map((j) => (
+              <div key={j.tradeNumber} className="flex gap-2 items-baseline">
+                <span className="text-muted-foreground shrink-0">#{j.tradeNumber}</span>
+                <span className="opacity-90">{j.proposedImprovement}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       {/* ── Cursor ───────────────────────────────────────── */}
       <div className="mt-3 flex items-center gap-1">
         <span>&gt;</span>
@@ -695,46 +906,12 @@ export default function TradingFloor() {
               )}
 
               {/* ── Journal ──────────────────────────────────────────────── */}
-              {activeModal.type === "journal" && activeTrader && (() => {
-                const cfg = TRADER_CONFIG[activeTrader.id];
-                const today = new Date().toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" });
-                return (
-                  <div className="flex flex-col gap-5" style={{ color: cfg.accent }}>
-                    <div>
-                      <div className="text-secondary">[{today}] Entry {String(1 + (activeTrader.closedTrades.length)).padStart(3, "0")}</div>
-                      <div className="text-[#222]">{"─".repeat(32)}</div>
-                      <div>Session started. Current bias: {activeTrader.bias.toUpperCase()}.</div>
-                      <div>Confidence: {activeTrader.confidence}%.</div>
-                      <div>Strategy focus: {activeTrader.strategyFocus}.</div>
-                      <div>{activeTrader.currentAction}.</div>
-                    </div>
-                    {activeTrader.closedTrades.slice(0, 3).map((t, i) => (
-                      <div key={i}>
-                        <div className="text-secondary">[{today}] Trade Log #{i + 1}</div>
-                        <div className="text-[#222]">{"─".repeat(32)}</div>
-                        <div>{t.direction} @ {t.entryPrice.toFixed(0)} → {t.exitPrice.toFixed(0)}</div>
-                        <div style={{ color: t.result >= 0 ? "#00ff88" : "#ff4444" }}>
-                          Result: {t.rMultiple >= 0 ? "+" : ""}{t.rMultiple.toFixed(1)}R ({fmtPL(t.result)})
-                        </div>
-                        <div className="text-muted-foreground">Reason: {t.reason}</div>
-                      </div>
-                    ))}
-                    {activeTrader.closedTrades.length === 0 && (
-                      <div>
-                        <div className="text-secondary">[{today}] Entry 001</div>
-                        <div className="text-[#222]">{"─".repeat(32)}</div>
-                        <div>No trades taken yet. Observing structure.</div>
-                        <div>Focus area: patience and entry timing.</div>
-                        <div>Next session target: clean execution.</div>
-                        <div>Risk limit: 1% per trade.</div>
-                      </div>
-                    )}
-                    <div>
-                      <div className="text-muted-foreground">[NOTE] {activeTrader.internalReasoning}</div>
-                    </div>
-                  </div>
-                );
-              })()}
+              {activeModal.type === "journal" && activeTrader && (
+                <JournalView
+                  trader={activeTrader}
+                  accent={TRADER_CONFIG[activeTrader.id].accent}
+                />
+              )}
 
               {/* ── Chat ─────────────────────────────────────────────────── */}
               {activeModal.type === "chat" && (
