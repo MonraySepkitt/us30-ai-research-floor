@@ -1,6 +1,6 @@
 import type { TraderState } from "../simulation/traderEngine";
 import type { LeaderboardRow } from "./types";
-import { TRADER_CONFIG } from "../pages/TradingFloor";
+import { TRADER_CONFIG } from "./traderConfig";
 
 export function buildLeaderboardRows(traderStates: TraderState[]): LeaderboardRow[] {
   return traderStates.map((t) => {
