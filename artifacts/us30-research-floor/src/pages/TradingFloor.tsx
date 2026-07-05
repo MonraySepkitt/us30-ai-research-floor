@@ -4,6 +4,8 @@ import { getInitialTraderStates, getSASTHHMM, type TraderState, type TraderId } 
 import { runICTCycle, runTrendCycle, runBreakoutCycle } from "../simulation/traderStrategies";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../lib/persistence";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import { getSASTTime, getMarketStatus, statusBadgeColor, fmtBal, fmtPL } from "../lib/format";
+import type { ActivityEntry, ChatMessage, RankMetric, LeaderboardRow } from "../lib/types";
 
 // ─── Visual config (accent colours, no simulation data) ───────────────────
 
@@ -44,62 +46,6 @@ const TRADER_CONFIG: Record<TraderId, {
     statusColor: "#ff6600",
   },
 };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────
-
-function getSASTTime() {
-  return new Intl.DateTimeFormat("en-ZA", {
-    timeZone: "Africa/Johannesburg",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date());
-}
-
-function getMarketStatus() {
-  const now = new Date();
-  const day = now.toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" });
-  const time = now.toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour12: false });
-  const [h, m] = time.split(":").map(Number);
-  const mins = h * 60 + m;
-  return !["Saturday", "Sunday"].includes(day) && mins >= 15 * 60 + 30 && mins < 22 * 60;
-}
-
-function statusBadgeColor(status: string) {
-  switch (status) {
-    case "Active": case "IN TRADE": return "#00ff88";
-    case "Observation": return "#ffcc00";
-    case "Rehabilitation": case "REHAB": return "#ff6600";
-    case "Suspended": return "#ff2222";
-    default: return "#00ccff";
-  }
-}
-
-function fmtBal(n: number) {
-  return `R${n.toFixed(2)}`;
-}
-
-function fmtPL(n: number) {
-  return (n >= 0 ? "+" : "") + `R${n.toFixed(2)}`;
-}
-
-// ─── Activity log entry ───────────────────────────────────────────────────
-
-interface ActivityEntry {
-  id: number;
-  time: string;
-  traderId: string;
-  msg: string;
-}
-
-// ─── Chat message ───────────────────────────────────────────────────────
-
-interface ChatMessage {
-  time: string;
-  name: string;
-  color: string;
-  msg: string;
-}
 
 // ─── Rule-based chat reply generator (no external AI/API calls) ──────────
 
@@ -685,23 +631,6 @@ function JournalView({ trader, accent }: { trader: TraderState; accent: string }
 }
 
 // ─── Leaderboard ────────────────────────────────────────────────────────
-
-type RankMetric = "balance" | "winRate" | "totalPL" | "avgR";
-
-interface LeaderboardRow {
-  id: TraderId;
-  name: string;
-  accent: string;
-  status: string;
-  balance: number;
-  totalTrades: number;
-  winRate: number;
-  totalPL: number;
-  avgR: number;
-  bestTrade: number;
-  worstTrade: number;
-  activeResearch: number;
-}
 
 const RANK_LABELS: Record<RankMetric, string> = {
   balance: "BALANCE",
